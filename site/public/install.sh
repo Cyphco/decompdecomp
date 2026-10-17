@@ -14,15 +14,16 @@
 #
 # Options:
 #   --no-start          install only
-#   --source <what>     where decompdecomp comes from: "release" (default), "branch:<name>" (a branch on GitHub, for
-#                       testing; its updates follow that branch) or a folder with decompdecomp's source. Run from a
-#                       git checkout, the checkout is used (and updates follow its branch; main's are releases).
+#   --source <what>     where decompdecomp comes from: "branch:main" (default: the newest code on GitHub, not a
+#                       release), "branch:<name>" (another branch on GitHub; its updates follow that branch),
+#                       "release" (the tagged release of this script) or a folder with decompdecomp's source. Run
+#                       from a git checkout, the checkout is used (and updates follow its branch).
 # The same through the environment: DECOMP_SOURCE=..., DECOMP_BRANCH=<name>.
 # On a server, decompdecomp also runs in Docker: docker-compose.yml in the repository.
 set -euo pipefail
 
 VERSION="1.0.2-alpha"
-REPO="n-delic/decompdecomp"
+REPO="Cyphco/decompdecomp"
 START=1
 SOURCE="${DECOMP_SOURCE:-}"
 [ -z "$SOURCE" ] && [ -n "${DECOMP_BRANCH:-}" ] && SOURCE="branch:${DECOMP_BRANCH}"
@@ -57,7 +58,7 @@ if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
     CHECKOUT="$(cd "$SCRIPT_DIR/../.." && pwd)"
   fi
 fi
-[ -n "$SOURCE" ] || SOURCE="${CHECKOUT:-release}"
+[ -n "$SOURCE" ] || SOURCE="${CHECKOUT:-branch:main}"
 
 # decompdecomp's own Linux (WSL on Windows, Docker): made by linux-base.sh; then this installs for its user only
 IN_BOX=""
@@ -78,9 +79,10 @@ command -v curl >/dev/null || fail "curl is required"
 
 # ------------------------------------------------------------------------------------------- where it comes from
 # CHANNEL/BRANCH/COMMIT are remembered (decomp install-info): the app's updates come from the same place.
-CHANNEL=release BRANCH="" COMMIT="" SPEC="" SRC_DIR=""
+CHANNEL=branch BRANCH="" COMMIT="" SPEC="" SRC_DIR=""
 case "$SOURCE" in
   release)
+    CHANNEL=release
     SPEC="decompnet @ ${DECOMP_WHEEL:-https://github.com/$REPO/archive/refs/tags/v${VERSION}.tar.gz}" ;;
   branch:*)
     CHANNEL=branch BRANCH="${SOURCE#branch:}"
@@ -92,8 +94,7 @@ case "$SOURCE" in
       BRANCH="$(git -c safe.directory='*' -C "$SRC_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
       COMMIT="$(git -c safe.directory='*' -C "$SRC_DIR" rev-parse HEAD 2>/dev/null || true)"
       [ "$BRANCH" = HEAD ] && BRANCH=""
-      # main is the release line: a checkout of it updates on releases, not on every commit
-      [ -n "$BRANCH" ] && [ "$BRANCH" != main ] && CHANNEL=branch
+      CHANNEL=branch; [ -n "$BRANCH" ] || BRANCH=main
     fi ;;
 esac
 

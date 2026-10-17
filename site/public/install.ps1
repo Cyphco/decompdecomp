@@ -12,7 +12,7 @@
 # Your projects live in it: \\wsl.localhost\decomp-wtf\home\decomp\Decomp. Nothing is sent anywhere.
 # Uninstall: decomp uninstall
 #
-# Testing a branch:  $env:DECOMP_BRANCH = "<name>"; irm https://raw.githubusercontent.com/n-delic/decompdecomp/<name>/site/public/install.ps1 | iex
+# Testing a branch:  $env:DECOMP_BRANCH = "<name>"; irm https://raw.githubusercontent.com/Cyphco/decompdecomp/<name>/site/public/install.ps1 | iex
 # From a checkout:   powershell -ExecutionPolicy Bypass -File site\public\install.ps1   (installs that checkout)
 
 # Everything runs in its own block: `irm | iex` runs a script in your PowerShell session, and its settings shouldn't
@@ -22,7 +22,7 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"  # Windows PowerShell downloads many times slower while drawing a progress bar
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 $Version = "1.0.2-alpha"
-$Repo = "n-delic/decompdecomp"
+$Repo = "Cyphco/decompdecomp"
 $Distro = "decomp-wtf"
 $Wsl = Join-Path $env:SystemRoot "System32\wsl.exe"
 # Say who's downloading. salsa.debian.org (Debian's WSL image) answers browser-like agents, as Windows PowerShell's
@@ -69,14 +69,14 @@ if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64" -and $env:PROCESSOR_ARCHITEW6432 -ne
 
 # ---------------------------------------------------------------------------- where decompdecomp comes from
 # Run from a checkout (site\public\install.ps1 in the repository): that checkout. Else $env:DECOMP_SOURCE,
-# $env:DECOMP_BRANCH (a branch on GitHub), or the newest release on GitHub.
+# $env:DECOMP_BRANCH (a branch on GitHub), or the newest code on GitHub (main).
 $checkout = $null
 if ($PSScriptRoot) {
     $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
     $py = Join-Path $root "pyproject.toml"
     if ((Test-Path $py) -and (Select-String -Path $py -Pattern '^name = "decompnet"' -Quiet)) { $checkout = $root }
 }
-$source = if ($env:DECOMP_SOURCE) { $env:DECOMP_SOURCE } elseif ($env:DECOMP_BRANCH) { "branch:$($env:DECOMP_BRANCH)" } elseif ($checkout) { $checkout } else { "release" }
+$source = if ($env:DECOMP_SOURCE) { $env:DECOMP_SOURCE } elseif ($env:DECOMP_BRANCH) { "branch:$($env:DECOMP_BRANCH)" } elseif ($checkout) { $checkout } else { "branch:main" }
 $linuxSource = if ($source -eq "release" -or $source.StartsWith("branch:")) { $source } else { To-Wsl $source }
 $web = "https://raw.githubusercontent.com/$Repo/$(if ($source.StartsWith("branch:")) { $source.Substring(7) } else { "main" })/site/public"
 

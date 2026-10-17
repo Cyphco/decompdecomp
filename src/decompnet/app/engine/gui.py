@@ -55,8 +55,21 @@ class GuiMixin:
                                              # (a suggestion its own check disproved isn't one: older ones were filed)
                                              "suggestions": [s for s in cfg.get("suggestions", []) if s["status"] == "open"
                                                              and not re.search(r"does not match|doesn't compile", s["check"] or "")],
+                                             # every suggestion with its outcome (open, applied, dismissed, refused), newest first:
+                                             # the Suggestions tab keeps what agents said after it stops being open
+                                             "suggestion_log": self._suggestion_log(cfg),
                                              "boundaries": [r for r in cfg.get("boundaries", []) if r["status"] == "open"],
                                              "compiler_ranges": self._range_rows(cfg), "auto_compiler": self.auto_adjusts(proj)}
+
+    @staticmethod
+    def _suggestion_log(cfg: dict, limit: int = 300) -> list[dict]:
+        checks = {c.get("suggestion"): c for c in cfg.get("range_checks", []) if c.get("suggestion")}
+        rows = []
+        for s in cfg.get("suggestions", []):
+            c = checks.get(s["id"])
+            rows.append({**{k: s.get(k) for k in ("id", "text", "toolchain", "flags", "ranges", "agents", "check", "status", "t")},
+                         "range_check": None if c is None else {"id": c["id"], "status": c["status"], "said": c.get("said", "")}})
+        return sorted(rows, key=lambda r: r["t"] or 0, reverse=True)[:limit]
 
     def _overview(self, slug: str, proj) -> dict:
         if (fork := self.fork_slug(slug)):

@@ -1,4 +1,4 @@
-"""Updates: decompdecomp finds a newer version (a release, or new commits on the branch it was installed from), installs
+"""Updates: decompdecomp finds a newer version (new commits on the branch it was installed from, main by default), installs
 it with uv and restarts in place. Offline: GitHub's answers are stand-ins."""
 
 import json
@@ -17,29 +17,37 @@ from decompnet.app import updates
 @pytest.fixture(autouse=True)
 def data_home(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "data"))  # where Windows keeps it
     return tmp_path / "data"
 
 
 def test_install_info_round_trip():
-    assert updates.installed()["channel"] == "release"  # nothing recorded: a release install
+    cur = updates.installed()  # nothing recorded: follows main
+    assert (cur["channel"], cur["branch"], cur["commit"], cur["repo"]) == ("branch", "main", "", updates.REPO)
     updates.record("branch", "cross-platform", "a" * 40)
     cur = updates.installed()
     assert (cur["channel"], cur["branch"], cur["commit"], cur["version"]) == ("branch", "cross-platform", "a" * 40, __version__)
-    updates.record("release", "ignored", "ignored")
-    assert updates.installed()["branch"] == "" and updates.installed()["commit"] == ""
+    updates.record("release", "", "")  # an older installer's "release" now means main's newest commit
+    assert updates.installed()["branch"] == "main" and updates.installed()["channel"] == "branch"
 
 
-def test_release_update(monkeypatch):
-    newer = ".".join(str(x + (1 if i == 2 else 0)) for i, x in enumerate(updates.version_key(__version__)[:3]))
-    def get(url, timeout=15):
-        assert url == "https://raw.githubusercontent.com/n-delic/decompdecomp/main/site/public/install.sh"
-        return f'#!/bin/sh\nVERSION="{newer}"\n'.encode()
-    monkeypatch.setattr(updates, "_get", get)
+def test_updates_follow_main_not_releases(monkeypatch):
+    have, head = "1" * 40, "2" * 40
+    updates.record("release", "", have)
+    seen = []
+
+    def get_json(url):
+        seen.append(url)
+        if "/compare/" in url:
+            return {"status": "ahead", "commits": [{"commit": {"message": "A new commit"}}]}
+        return {"sha": head, "commit": {"message": "A new commit", "committer": {"date": "2026-10-17"}}}
+    monkeypatch.setattr(updates, "_json", get_json)
+    monkeypatch.setattr(updates, "_branch_version", lambda repo, sha: "9.9.9")
     found = updates.check()
-    assert found["available"] and found["latest"]["version"] == newer and found["error"] is None
-    assert found["spec"] == f"decompnet @ https://github.com/n-delic/decompdecomp/archive/refs/tags/v{newer}.tar.gz"
-    monkeypatch.setattr(updates, "_get", lambda url, timeout=15: f'VERSION="{__version__}"\n'.encode())
-    assert not updates.check()["available"]
+    assert found["available"] and found["latest"]["commit"] == head
+    assert found["spec"] == f"decompnet @ https://github.com/{updates.REPO}/archive/{head}.tar.gz"
+    assert seen[0] == f"https://api.github.com/repos/{updates.REPO}/commits/main"
+    assert not any("install.sh" in u or "/tags/" in u for u in seen)
 
 
 def test_branch_update(monkeypatch):
@@ -54,7 +62,7 @@ def test_branch_update(monkeypatch):
     monkeypatch.setattr(updates, "_branch_version", lambda repo, sha: "0.10.0")
     found = updates.check()
     assert found["available"] and found["latest"]["commit"] == head and found["notes"] == ["Newest", "Older one"]
-    assert found["spec"] == f"decompnet @ https://github.com/n-delic/decompdecomp/archive/{head}.tar.gz"
+    assert found["spec"] == f"decompnet @ https://github.com/{updates.REPO}/archive/{head}.tar.gz"
 
     # installed from a commit newer than the branch (pushed elsewhere): not an "update"
     answers[f"compare/{have}...{head}"] = {"status": "behind", "commits": []}
@@ -95,7 +103,7 @@ def test_install_runs_uv_then_the_new_setup(tmp_path, monkeypatch):
     monkeypatch.setattr(updates, "uv", lambda: str(uv))
     updates.record("branch", "cross-platform", "1" * 40)
     found = {"current": updates.installed(), "available": True, "latest": {"version": "0.10.0", "commit": "2" * 40},
-             "spec": "decompnet @ https://github.com/n-delic/decompdecomp/archive/" + "2" * 40 + ".tar.gz"}
+             "spec": "decompnet @ https://github.com/Cyphco/decompdecomp/archive/" + "2" * 40 + ".tar.gz"}
     said = []
     updates.install(found, log=said.append)
     ran = calls.read_text().splitlines()
@@ -188,7 +196,7 @@ def test_a_packaged_install_points_at_the_releases(monkeypatch):
     """A .deb or an AppImage isn't a uv tool: installing over it with uv would leave the package behind."""
     monkeypatch.setenv("DECOMP_PACKAGE", "appimage")
     ok, why = updates.can_apply()
-    assert not ok and "AppImage" in why and f"github.com/{updates.REPO}/releases" in why
+    assert not ok and "AppImage" in why and f"github.com/{updates.REPO}" in why
 
 
 def test_an_appimage_bridge_is_the_appimage_itself(monkeypatch):
@@ -197,9 +205,10 @@ def test_an_appimage_bridge_is_the_appimage_itself(monkeypatch):
     assert connect.bridge_command() == ["/home/me/decompdecomp.AppImage", "mcp"]
 
 
-def test_an_install_from_main_updates_on_releases_only():
-    """Installed from a checkout of main, every commit used to be offered as an update (a website edit too)."""
+def test_an_install_from_main_updates_on_every_commit():
+    """The fork follows the newest code on main, not tagged releases."""
     updates.record("branch", branch="main", commit="abc123")
-    assert updates.installed()["channel"] == "release"
+    cur = updates.installed()
+    assert (cur["channel"], cur["branch"], cur["commit"]) == ("branch", "main", "abc123")
     updates.record("branch", branch="window-fix", commit="abc123")
-    assert updates.installed()["channel"] == "branch"
+    assert updates.installed()["branch"] == "window-fix"

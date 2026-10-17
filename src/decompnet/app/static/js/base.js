@@ -92,7 +92,7 @@ const S = {
   projects: [],
 };
 const VIEWS = ["home", "catalog", "project", "agentsPage", "toolsPage", "settingsPage"];
-const TABS = ["overview", "functions", "agents", "activity", "team", "source", "settings"];
+const TABS = ["overview", "functions", "agents", "suggestions", "activity", "team", "source", "settings"];
 
 /* The project folder in the computer's file manager (decompdecomp in Docker says where it is instead). */
 function openFolder() {

@@ -186,6 +186,7 @@
       <a role="tab" data-ptab="overview">Overview</a>
       <a role="tab" data-ptab="functions">Functions <span class="count" id="fnTabCount"></span></a>
       <a role="tab" data-ptab="agents">Agents <span class="count" id="agTabCount"></span></a>
+      <a role="tab" data-ptab="suggestions">Suggestions <span class="count" id="sgTabCount"></span></a>
       <a role="tab" data-ptab="activity">Activity</a>
       <a role="tab" data-ptab="team">Team <span class="count" id="teamTabCount"></span></a>
       <a role="tab" data-ptab="source">Source</a>
@@ -322,6 +323,17 @@
     </section>
   </section>
 
+  <!-- suggestions: everything agents have suggested, with how it ended -->
+  <section class="ptab" data-pane="suggestions" hidden>
+    <section class="panel">
+      <header class="panel-head"><h2>Suggestions from agents</h2><span class="muted small">changes they can't make themselves, and what became of them</span></header>
+      <div class="pad">
+        <div class="chips" id="sgFilter" role="group" aria-label="Show suggestions"></div>
+        <div id="sgList" class="sg-list"></div>
+      </div>
+    </section>
+  </section>
+
   <!-- activity -->
   <section class="ptab" data-pane="activity">
     <div class="cols activity-cols">
@@ -366,7 +378,7 @@
           <label class="field"><span>Flags</span><input id="setFlags" class="mono"></label>
           <label class="field"><span>Only for these address ranges (optional: parts of the game built with another compiler)</span><input id="setRanges" class="mono" placeholder="0x10BFD0-0x10CD40, 0x1106C0-0x1107C0"></label>
           <div class="row"><button class="primary small-btn" id="setTcSave" type="button">Save</button><button class="ghost small-btn" id="setTcReset" type="button">Default flags</button></div>
-          <label class="check"><input type="checkbox" id="autoAdjust"><span><b>Auto-adjust the compiler for this game</b>: agents' compiler suggestions apply by themselves once proven (a function's C matches with them; a range also needs a neighbouring function to confirm it) or three agents agree. Otherwise they wait for you on the Agents tab.</span></label>
+          <label class="check"><input type="checkbox" id="autoAdjust"><span><b>Auto-adjust the compiler for this game</b>: agents' compiler suggestions apply by themselves once proven (a function's C matches with them; a range also needs a neighbouring function to confirm it) or three agents agree. Otherwise they wait for you on the Suggestions tab.</span></label>
           <div id="rangeList"></div>
         </div>
       </section>

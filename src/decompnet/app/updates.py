@@ -1,10 +1,9 @@
 """Updates: decompdecomp finds out when there's a newer version of itself and, once the user says yes, installs it
 and restarts in place (same port, same browser session; helper agents carry on afterwards).
 
-Where updates come from depends on how decompdecomp was installed (install.json, written by the installer):
-- "release": the newest release on GitHub (main's install.sh says which one), installed from its tag's archive
-- "branch":  the newest commit of a branch on GitHub (for testing a branch before it's released), installed from
-             GitHub's archive of that commit
+Updates follow the newest commit of a branch on GitHub (main unless installed from another branch), not releases:
+every push is an update. install.json (written by the installer) records the repository, branch and the commit
+installed; the new version is installed from GitHub's archive of the branch's newest commit.
 Installing is `uv tool install --force` of the new version, then its `decomp setup` (new pinned tools), then the
 running app becomes the new version with exec (the process, its console window and its port stay the same).
 """
@@ -26,8 +25,8 @@ from pathlib import Path
 
 from .. import __version__, hostenv, toolchains
 
-REPO = "n-delic/decompdecomp"
-RECHECK = {"release": 3 * 3600, "branch": 15 * 60}  # GitHub allows 60 unauthenticated API calls an hour
+REPO = "Cyphco/decompdecomp"
+RECHECK = 15 * 60  # GitHub allows 60 unauthenticated API calls an hour
 
 
 def info_file() -> Path:
@@ -40,22 +39,20 @@ def installed() -> dict:
         data = json.loads(info_file().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         data = {}
-    if not isinstance(data, dict) or data.get("channel") not in ("release", "branch"):
-        data = {"channel": "release"}
-    if data["channel"] == "branch" and data.get("branch") in ("", None, "main"):
-        # main is the release line: installed from a checkout of it, every commit (a website edit too) was offered
-        # as an update; it updates on releases, as an install from the installer does
-        data = {**data, "channel": "release", "branch": "", "commit": ""}
+    if not isinstance(data, dict):
+        data = {}
+    # always a branch: older installs recorded the "release" channel, which now means main's newest commit
+    data = {**data, "channel": "branch", "branch": data.get("branch") or "main"}
+    data["commit"] = data.get("commit") or ""
     data.setdefault("repo", REPO)
     data["version"] = __version__
     return data
 
 
-def record(channel: str, branch: str = "", commit: str = "", repo: str = REPO) -> dict:
-    data = {"channel": channel if channel in ("release", "branch") else "release", "repo": repo or REPO,
-            "branch": branch, "commit": commit, "version": __version__, "t": time.time()}
-    if data["channel"] == "release":
-        data.update(branch="", commit="")
+def record(channel: str = "branch", branch: str = "", commit: str = "", repo: str = REPO) -> dict:
+    """Remember where this copy came from. `channel` is kept for older installers: every install follows a branch."""
+    data = {"channel": "branch", "repo": repo or REPO, "branch": branch or "main", "commit": commit,
+            "version": __version__, "t": time.time()}
     info_file().parent.mkdir(parents=True, exist_ok=True)
     info_file().write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return data
@@ -87,18 +84,6 @@ def _json(url: str) -> dict:
 
 def _first_line(message: str) -> str:
     return (message or "").strip().splitlines()[0][:140] if (message or "").strip() else ""
-
-
-def _check_release(cur: dict) -> dict:
-    text = _get(f"https://raw.githubusercontent.com/{cur['repo']}/main/site/public/install.sh").decode("utf-8", "replace")
-    m = re.search(r'^VERSION="([^"]+)"', text, re.M)
-    if not m:
-        raise ValueError("decompdecomp didn't say which version is current")
-    latest = m.group(1)
-    newer = version_key(latest) > version_key(cur["version"])
-    spec = f"decompnet @ https://github.com/{cur['repo']}/archive/refs/tags/v{latest}.tar.gz"
-    return {"available": newer, "latest": {"version": latest, "commit": "", "date": None},
-            "notes": [], "link": f"https://github.com/{cur['repo']}/commits/main", "spec": spec}
 
 
 def _branch_version(repo: str, sha: str) -> str:
@@ -139,7 +124,7 @@ def check() -> dict:
     out = {"current": cur, "available": False, "latest": None, "notes": [], "link": None, "error": None,
            "checked": time.time(), "can_apply": can_apply()[0], "why_not": can_apply()[1]}
     try:
-        out.update(_check_branch(cur) if cur["channel"] == "branch" else _check_release(cur))
+        out.update(_check_branch(cur))
     except (OSError, ValueError, KeyError) as e:
         out["error"] = f"couldn't check for updates: {e}"
     return out
@@ -158,10 +143,10 @@ def uv() -> str | None:
 def can_apply() -> tuple[bool, str]:
     if (package := os.environ.get("DECOMP_PACKAGE")):  # set by the .deb's and the AppImage's launchers
         return False, (f"this decompdecomp was installed as {'an AppImage' if package == 'appimage' else 'a .deb'}: "
-                       f"download the new one from https://github.com/{REPO}/releases")
+                       f"download the newest one from https://github.com/{REPO}")
     if sys.platform == "win32":
         return False, ("decompdecomp now runs in WSL 2 on Windows: run the installer again in PowerShell "
-                       "(irm https://decomp.ndelic.com/install.ps1 | iex) to switch to it")
+                       f"(irm https://raw.githubusercontent.com/{REPO}/main/site/public/install.ps1 | iex) to switch to it")
     if not uv():
         return False, "uv isn't installed here, so decompdecomp can't update itself: run the installer again"
     return True, ""
@@ -174,7 +159,7 @@ def install(found: dict, log=print) -> dict:
         raise RuntimeError(why)
     cur = found["current"]
     log(f"installing decompdecomp {found['latest'].get('version') or ''}".rstrip()
-        + (f" ({cur.get('branch')} @ {found['latest']['commit'][:7]})" if cur["channel"] == "branch" else ""))
+        + f" ({cur.get('branch')} @ {found['latest']['commit'][:7]})")
     cmd = [uv(), "tool", "install", "--force", "--python", "3.12", found["spec"]]
     _stream(cmd, log, "installing the update failed")
     bindir = subprocess.run([uv(), "tool", "dir", "--bin"], capture_output=True, text=True).stdout.strip()
@@ -183,7 +168,7 @@ def install(found: dict, log=print) -> dict:
         raise RuntimeError("the update was installed, but its decomp command isn't there")
     log("getting the tools this version needs")
     _stream([str(decomp), "setup"], log, "setting up the new version's tools failed")
-    data = {"channel": cur["channel"], "repo": cur.get("repo") or REPO, "branch": cur.get("branch") or "",
+    data = {"channel": "branch", "repo": cur.get("repo") or REPO, "branch": cur.get("branch") or "",
             "commit": found["latest"].get("commit") or "", "version": found["latest"].get("version") or "",
             "t": time.time()}
     info_file().write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
@@ -230,8 +215,7 @@ class Updater:
 
     def status(self, refresh: bool = False) -> dict:
         cur = self.last
-        channel = installed()["channel"]
-        if refresh or cur is None or time.time() - cur.get("checked", 0) > RECHECK[channel]:
+        if refresh or cur is None or time.time() - cur.get("checked", 0) > RECHECK:
             self.last = cur = check()
         return {**cur, "job": {k: (v[-200:] if k == "log" else v) for k, v in self.job.items()},
                 "runtime": hostenv.runtime()}

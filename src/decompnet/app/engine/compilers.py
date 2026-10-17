@@ -253,6 +253,7 @@ class CompilerMixin:
             if function:
                 check = self._check_compiler(proj, tc, flag_list, function, source)
                 if re.search(r"does not match|doesn't compile", check):
+                    self._log_refused(slug, agent, text, tc, flag_list, spans, check)
                     raise NetworkError(f"not suggested: {check.removeprefix('checked: ')}. Test compilers with "
                                        "try_compiler first; suggest the one its C matches with")
 
@@ -284,6 +285,19 @@ class CompilerMixin:
             return (f"Applied (the user lets agreed compiler changes apply themselves): {where} with "
                     f"{SHORT_NAMES.get(tc, tc)} {' '.join(flag_list)} from now on.{note}")
         return f"Suggested: the user sees it on the project page and can apply it.{note}"
+
+    def _log_refused(self, slug: str, agent: Agent, text: str, tc: str, flags: list[str], spans: list,
+                     check: str) -> None:
+        """A suggestion its own check disproved is refused to the agent, but kept (status "refused") so the user can
+        see what was tried in the Suggestions tab, not only what survived."""
+        def change(cfg):
+            items = cfg.setdefault("suggestions", [])
+            if sum(s["status"] == "refused" for s in items) >= 100:  # a long-running game keeps the newest hundred
+                items.remove(next(s for s in items if s["status"] == "refused"))
+            items.append({"id": max((s["id"] for s in items), default=0) + 1, "text": text, "toolchain": tc,
+                          "flags": flags, "ranges": spans, "agents": [agent.name], "check": check.removeprefix("checked: "),
+                          "status": "refused", "t": time.time()})
+        self._update_cfg(slug, change)
 
     def auto_adjusts(self, proj) -> bool:
         """Whether this project's proven compiler suggestions apply by themselves: the project's own setting (a game

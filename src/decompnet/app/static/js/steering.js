@@ -100,7 +100,48 @@ async function openHostConnect() {
 }
 
 /* ------------------------------------------------------------------ steering: instructions, next in line */
+const SG_FILTERS = [["all", "All"], ["open", "Open"], ["applied", "Applied"], ["dismissed", "Dismissed"], ["refused", "Refused"]];
+let sgFilter = "open";
+function renderSuggestions(ov) {
+  const log = ov.suggestion_log || [];
+  const open = log.filter((s) => s.status === "open").length;
+  $("sgTabCount").textContent = open || "";
+  if (S.tab !== "suggestions") return;
+  if (!open && sgFilter === "open" && log.length) sgFilter = "all";  // nothing waiting: show what happened instead
+  const n = (k) => (k === "all" ? log.length : log.filter((s) => s.status === k).length);
+  setHtml($("sgFilter"), SG_FILTERS.map(([k, label]) => `<button type="button" class="chip${k === sgFilter ? " on" : ""}" data-sgf="${k}">${label}<span>${n(k)}</span></button>`).join(""));
+  const tcName = (id) => (S.st?.toolchains || []).find((t) => t.id === id)?.name || id;
+  const rows = log.filter((s) => sgFilter === "all" || s.status === sgFilter);
+  const when = (t) => new Date(t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+  setHtml($("sgList"), rows.length ? rows.map((s) => {
+    const rc = s.range_check;
+    const what = s.toolchain ? `${tcName(s.toolchain)} ${(s.flags || []).join(" ")}${(s.ranges || []).length ? ` · ${s.ranges.length} range${s.ranges.length > 1 ? "s" : ""}: ${s.ranges.map((r) => `${hex8(r[0])}-${hex8(r[1])}`).join(", ")}` : ""}` : "";
+    return `<div class="note"><small><span class="sg-status ${esc(s.status)}">${esc(s.status)}</span>${esc((s.agents || []).join(", "))}${(s.agents || []).length > 1 ? ` · ${s.agents.length} agents agree` : ""} · ${when(s.t)}</small>
+      ${esc(s.text)}
+      ${what ? `<p class="small mono">${esc(what)}</p>` : ""}
+      ${s.check ? `<p class="small ${s.check.includes("matches the game") ? "" : "muted"}">${s.check.includes("matches the game") ? "✓ " : ""}${esc(s.check)}</p>` : ""}
+      ${rc ? `<p class="small muted">range check #${rc.id}: ${esc(rc.status)}${rc.said ? ` · ${esc(rc.said)}` : ""}</p>` : ""}
+      ${s.status === "open" ? `<div class="row">${s.toolchain ? `<button class="primary small-btn" type="button" data-apply="${s.id}">Apply</button>` : ""}<button class="ghost small-btn" type="button" data-dismiss="${s.id}">Dismiss</button></div>` : ""}</div>`;
+  }).join("") : `<p class="muted small empty">${log.length ? "Nothing here." : "No agent has suggested anything yet. When one does (a compiler or flag change, say), it shows up here."}</p>`);
+}
+$("sgFilter").onclick = (e) => {
+  const b = e.target.closest("button[data-sgf]");
+  if (b) { sgFilter = b.dataset.sgf; renderSuggestions(S.ov); }
+};
+$("sgList").onclick = async (e) => {
+  const b = e.target.closest("button[data-apply], button[data-dismiss]");
+  if (!b) return;
+  const apply = b.dataset.apply != null;
+  try {
+    S.ov = await api("/api/suggestion", { method: "POST", body: { slug: S.slug, id: Number(b.dataset.apply || b.dataset.dismiss), action: apply ? "apply" : "dismiss" } });
+    renderStats(S.ov);
+    renderProjectSettings();
+    toast(apply ? "Applied. Agents compile with it from their next attempt on." : "Dismissed.");
+  } catch (err) { toast(esc(err.message), "err"); }
+};
+
 function renderSteering(ov) {
+  renderSuggestions(ov);
   const sp = ov.spend;
   const n = ov.helper_matches || 0;
   $("spendLine").textContent = sp && sp.usd ? `· ${money(sp.usd)} spent${n ? ` · ${money(sp.usd / n)}/match` : ""}`

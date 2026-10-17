@@ -52,6 +52,7 @@ function setTab(tab) {
   if (tab === "overview") { if (S.map.length) layoutMap(); renderOverview(); }
   if (tab === "functions") renderList();
   if (tab === "agents") { renderLauncher($("launcher")); renderSessions(S.sessions); renderPrio(); loadStats(); }
+  if (tab === "suggestions" && S.ov) renderSuggestions(S.ov);
   if (tab === "team") renderTeam();
   if (tab === "source" && S.ov) renderSource(S.ov);
   if (tab === "settings") renderProjectSettings();
