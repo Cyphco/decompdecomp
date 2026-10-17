@@ -312,6 +312,22 @@ def _opencode_2(exe: str) -> bool:
     return bool(m) and int(m.group(1)) >= 2
 
 
+_flags: dict[tuple[str, str], bool] = {}
+
+
+def _has_flag(exe: str, flag: str) -> bool:
+    """Whether `opencode run` knows a flag (asked once: its help lists them). A flag an older opencode doesn't know stops
+    it at once, so an option is only passed to the versions that have it."""
+    if (exe, flag) not in _flags:
+        try:
+            text = subprocess.run(argv([exe, "run", "--help"]), capture_output=True, text=True, encoding="utf-8",
+                                  errors="replace", timeout=20)
+            _flags[exe, flag] = flag in (text.stdout + text.stderr)
+        except (OSError, subprocess.TimeoutExpired):
+            _flags[exe, flag] = False
+    return _flags[exe, flag]
+
+
 def argv(cmd: list[str]) -> list[str]:
     """The command to start, as Windows needs it. npm installs agents there as .cmd scripts, which run through cmd.exe:
     it cuts an argument at its first line break (a prompt loses everything after its first line, and the flags after
@@ -529,6 +545,10 @@ def parse_line(kind: str, line: str, state: dict | None = None) -> list[tuple[st
         text = obj["part"].get("text", "").strip()
         if text:
             out.append(("text", text))
+    elif t == "reasoning" and isinstance(obj.get("part"), dict):  # opencode --thinking
+        text = obj["part"].get("text", "").strip()
+        if text:
+            out.append(("think", text))
     elif t in ("step_finish", "step-finish") and isinstance(obj.get("part"), dict):  # opencode: cost per step
         part = obj["part"]
         if isinstance(part.get("cost"), (int, float)) and part["cost"]:
@@ -968,6 +988,8 @@ class Manager:
             # (No --dir: it runs in workdir, and OpenCode before 1.4 stops at the flag. No --log-level either: before
             # 2.0 it took only ERROR, from 2.0 only error, and either stops the other at once.)
             cmd = [exe, "run", *(["--standalone"] if _opencode_2(exe) else []), "--format", "json", "--print-logs"]
+            if _has_flag(exe, "--thinking"):  # the model's reasoning, for the feed and the log (else only its answers)
+                cmd.append("--thinking")
             if model:
                 cmd += ["-m", model]
         else:

@@ -60,3 +60,24 @@ def test_the_app_reads_the_tail_of_a_log_and_lists_them(tmp_path):
 def test_a_log_id_cannot_leave_the_log_folder(tmp_path, bad):
     with pytest.raises(ValueError):
         _bare(tmp_path).read_log(bad)
+
+
+def test_opencodes_reasoning_reaches_the_feed_and_the_log(tmp_path):
+    line = '{"type":"reasoning","part":{"type":"reasoning","text":"The diff is one register off."}}'
+    assert agents.parse_line("opencode", line) == [("think", "The diff is one register off.")]
+    s = session(tmp_path)
+    s.raw("out", line)
+    s.push("think", "The diff is one register off.")
+    assert s.log_path.read_text(encoding="utf-8").count("The diff is one register off.") == 2
+
+
+def test_a_flag_is_only_passed_to_an_opencode_that_knows_it(monkeypatch):
+    import subprocess as sp
+
+    agents._flags.clear()
+    monkeypatch.setattr(sp, "run", lambda *a, **k: sp.CompletedProcess(a, 0, stdout="  --thinking  show thinking", stderr=""))
+    assert agents._has_flag("opencode", "--thinking")
+    agents._flags.clear()
+    monkeypatch.setattr(sp, "run", lambda *a, **k: sp.CompletedProcess(a, 0, stdout="  --format", stderr=""))
+    assert not agents._has_flag("opencode", "--thinking")
+    agents._flags.clear()

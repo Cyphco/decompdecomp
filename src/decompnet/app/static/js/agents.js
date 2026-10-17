@@ -88,6 +88,7 @@ async function openAgentLog(id) {
     try {
       const o = JSON.parse(m[2]);
       const p = o.part || {};
+      if (o.type === "reasoning") return `${m[1]} thinks  ${short(p.text || "", 600)}`;
       if (o.type === "text") return `${m[1]} says   ${short(p.text || "", 400)}`;
       if (o.type === "tool_use") return `${m[1]} tool    ${p.tool}${p.state?.status && p.state.status !== "completed" ? ` (${p.state.status})` : ""} ${short(p.state?.input ?? "")}\n${" ".repeat(9)}→ ${short(p.state?.output ?? p.state?.error ?? "", 300)}`;
       if (o.type === "error") return `${m[1]} ERROR   ${short(o.error ?? o, 400)}`;
