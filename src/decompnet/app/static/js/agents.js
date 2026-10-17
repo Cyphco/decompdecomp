@@ -79,7 +79,9 @@ function renderSessions(sessions) {
 
 /* A helper's log, for debugging: what the agent printed (raw), its stderr, the command and prompt it was given, and why it
    stopped. Kept on disk, so it's here after a restart too. */
+let logView = 0;  // which open of the viewer is current: an older one's timer and requests must not touch the panel
 async function openAgentLog(id) {
+  const mine = ++logView;
   dialog(`Log: ${id}`, `<p class="muted small" id="logMeta">Loading…</p>
     <div class="row"><button class="ghost small-btn" id="logRefresh" type="button">Refresh</button>
       <button class="ghost small-btn" id="logCopy" type="button">Copy</button>
@@ -117,12 +119,16 @@ async function openAgentLog(id) {
   const load = async () => {
     try {
       const r = await api(`/api/agents/log?id=${encodeURIComponent(id)}`);
+      if (mine !== logView) return;  // another log was opened meanwhile (or this one closed): leave the panel alone
       text = r.text;
       $("logMeta").textContent = `${(r.size / 1024).toFixed(0)} KB${r.truncated ? " (the end of it)" : ""} · ${r.path}`;
       show();
-    } catch (e) { $("logMeta").textContent = e.message; }
+    } catch (e) { if (mine === logView) $("logMeta").textContent = e.message; }
   };
-  const timer = setInterval(() => { if ($("dialog").hidden || !$("logLive")) clearInterval(timer); else if ($("logLive").checked) load(); }, 3000);
+  const timer = setInterval(() => {
+    if (mine !== logView || $("dialog").hidden || !$("logLive")) clearInterval(timer);
+    else if ($("logLive").checked) load();
+  }, 3000);
   $("logRefresh").onclick = load;
   $("logMode").onchange = show;
   $("logCopy").onclick = () => navigator.clipboard.writeText(text).then(() => toast("Log copied."));
