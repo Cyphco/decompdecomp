@@ -11,7 +11,7 @@ import struct
 
 from ... import classes, seeds, similarity
 from ...network import WALL_ABANDONS, NetworkError
-from ...rom import match
+from ...rom import listing, match
 from .common import _ADDRESS
 
 
@@ -34,7 +34,11 @@ class BriefMixin:
     def _asm_text(self, fn, proj) -> str:
         if not self.is_rom(proj):
             return super()._asm_text(fn, proj)
-        return self.rename_tokens(proj, fn["asm"])
+        text = fn["asm"]
+        if self.cfg(proj).get("platform") == "gba" and fn["target"]:
+            # case bodies after a jump table come out of the split as raw `.byte` data: decode them for the reader
+            text = listing.repair(text, fn["vram"], bytes(fn["target"]))
+        return self.rename_tokens(proj, text)
 
     def _seed_for(self, fn, proj) -> str | None:
         """m2c draft, made the first time someone opens the function (imports stay fast)."""

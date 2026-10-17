@@ -149,6 +149,23 @@ def _refs(code: bytes, addr: int, literals: set[int], off: int) -> list[tuple[in
     return out
 
 
+def function_extents(rom: bytes, starts: list[int], literals: set[int] | None = None) -> dict[int, int]:
+    """address -> end offset in the ROM of each function: where its code ends (a return no branch jumps past; a jump
+    table's case bodies belong to it), then the literal pool after the code, never beyond the next function."""
+    starts = sorted(starts)
+    literals = gba_candidates.literal_words(rom, starts) if literals is None else literals
+    ends = {start + BASE: end for start, end, _ in gba_candidates.bodies(rom, starts, literals)}
+    out = {}
+    for k, addr in enumerate(starts):
+        limit = (starts[k + 1] - BASE) if k + 1 < len(starts) else len(rom)
+        end = min(ends.get(addr, limit), limit)
+        while end + 4 <= limit and (end in literals or (end % 4 == 2 and end + 2 in literals and
+                                                       rom[end:end + 2] in (b"\0\0", b"\xc0\x46"))):
+            end += 2 if end % 4 == 2 and end not in literals else 4  # the literal pool after the code
+        out[addr] = end
+    return out
+
+
 def split(rom_path: Path, workdir: Path, log=print) -> list[GbaFunction]:
     """Every function in the ROM: its bytes (code and the literal pool it loads), assembly and size."""
     rom = rom_path.read_bytes()
@@ -159,15 +176,11 @@ def split(rom_path: Path, workdir: Path, log=print) -> list[GbaFunction]:
     blocks = _asm_blocks(asm)
     starts = sorted({a & ~1 for a in found if BASE <= (a & ~1) < BASE + len(rom)})
     literals = gba_candidates.literal_words(rom, starts)
-    ends = {start + BASE: end for start, end, _ in gba_candidates.bodies(rom, starts, literals)}
+    extents = function_extents(rom, starts, literals)
     out = []
-    for k, addr in enumerate(starts):
+    for addr in starts:
         off = addr - BASE
-        limit = (starts[k + 1] - BASE) if k + 1 < len(starts) else len(rom)
-        end = min(ends.get(addr, limit), limit)
-        while end + 4 <= limit and (end in literals or (end % 4 == 2 and end + 2 in literals and
-                                                       rom[end:end + 2] in (b"\0\0", b"\xc0\x46"))):
-            end += 2 if end % 4 == 2 and end not in literals else 4  # the literal pool after the code
+        end = extents[addr]
         text, thumb = blocks.get(addr, (f"\tthumb_func_start sub_{addr:08X}\n", True))
         code = rom[off:end]
         out.append(GbaFunction(f"sub_{addr:08X}", addr, off, code, text, max(1, len(code) // 2), thumb,

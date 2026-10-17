@@ -170,7 +170,6 @@ def test_the_queue_does_not_hand_back_what_a_helper_just_released(tmp_path):
         for name, vram in (("big", 4096), ("next", 8192), ("other", 12288)):
             db.execute("INSERT INTO functions(project_id,name,vram,n_insns) VALUES(1,?,?,5)", (name, vram))
     a = n.authenticate(n.register_agent("a", "a"))
-    b = n.authenticate(n.register_agent("b", "b"))
     assert n.claim_row(a, "p")["name"] == "big"  # the queue's first
     n.release(a, "big", "too large", "p")
     assert n.claim_row(a, "p")["name"] == "next"  # not "big" again: a gave it up

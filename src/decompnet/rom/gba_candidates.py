@@ -51,7 +51,25 @@ def _target(ins) -> int | None:
     return None
 
 
-def bodies(rom: bytes, known: list[int], literals: set[int] | None = None):
+def _switch_table(rom: bytes, pos: int, lo: int, hi: int) -> tuple[int, list[int]]:
+    """After `mov pc, rN` at `pos` (the next halfword): the jump table that follows, as (offset after it, the case
+    addresses as ROM offsets). A switch is `ldr r0, [r0, r1]` / `mov pc, r0`, then some literal-pool words (the table's
+    own address among them) and the table: consecutive words that point back into this function. Without one,
+    (pos, [])."""
+    scan = (pos + 3) & ~3
+    while scan < min(hi, pos + 72) and not lo <= (rom[scan] | rom[scan + 1] << 8 | rom[scan + 2] << 16 | rom[scan + 3] << 24) - BASE < hi:
+        scan += 4
+    cases = []
+    while scan + 4 <= hi:
+        v = rom[scan] | rom[scan + 1] << 8 | rom[scan + 2] << 16 | rom[scan + 3] << 24
+        if not lo <= v - BASE < hi:
+            break
+        cases.append((v & ~1) - BASE)
+        scan += 4
+    return (scan, cases) if cases else (pos, [])
+
+
+def bodies(rom: bytes, known: list[int], literals: set[int] | None = None, switches: bool = True):
     """(start offset, end offset, instructions) of each known function: it ends at the first return that none of its
     own earlier branches jumps past (later code with a gap is another function or data). Literal pools in the
     middle of a function (after an unconditional branch) are stepped over."""
@@ -70,6 +88,15 @@ def bodies(rom: bytes, known: list[int], literals: set[int] | None = None):
                 break
             body.append(ins)
             pos += ins.size
+            if switches and ins.mnemonic == "mov" and ins.op_str.startswith("pc,"):
+                # a switch: the table and the case bodies after it are this function's, and a return among them
+                # doesn't end it while a case further on is still to come (it ended at the table, and the case
+                # bodies, 3,000 bytes of sub_080204E0, were left out of its target and shown as raw bytes)
+                after, cases = _switch_table(rom, pos, start, limit)
+                if cases:
+                    furthest = max(furthest, *cases)
+                    pos = after
+                continue
             t = _target(ins)
             if t is not None:
                 furthest = max(furthest, t - BASE)
