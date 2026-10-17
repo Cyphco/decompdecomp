@@ -52,3 +52,23 @@ def test_the_walls_can_be_listed(tmp_path):
             db.execute("INSERT INTO functions(project_id,name,vram,n_insns,abandons) VALUES(1,?,4096,5,?)", (name, abandons))
     out = n.list_functions("p", "walls")
     assert "wall" in out and "fresh" not in out
+
+
+def test_a_declaration_after_a_statement_gets_a_c89_hint():
+    from decompnet.network import compile_hints
+
+    source = "void f(int *a) {\n    int x[2];\n    g(x);\n\n    int y = x[0];\n    *a = y;\n}\n"
+    log = "func.c: In function `f':\nfunc.c:5: syntax error before `y'\nfunc.c:6: `y' undeclared (first use in this function)"
+    hint = compile_hints(source, log)
+    assert "C89" in hint and "int y = x[0];" in hint
+    loop = "void f(void) {\n    for (int i = 0; i < 3; i++) {}\n}\n"
+    assert "for (int i" in compile_hints(loop, "func.c:2: syntax error before `int'")
+    assert compile_hints("int f(void) { return 0 }", "func.c:1: syntax error before `}'") == ""  # not this mistake: no hint
+
+
+def test_the_same_failing_source_is_recognised_whatever_its_spacing():
+    from decompnet.network import same_source
+
+    assert same_source("void f(void) {\n  g();\n}\n", "void f(void){ g(); }")
+    assert not same_source("void f(void) { g(); }", "void f(void) { h(); }")
+    assert not same_source(None, "x") and not same_source("", "")

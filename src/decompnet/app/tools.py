@@ -80,7 +80,9 @@ Use only the decomp tools. Repeat for up to {count} claims (a batch is one), the
 5. compile_and_diff says when to move on (no better after 4 compiles in a row; up to 10 for big functions):
    then release_function with precise notes (what you tried, what is left) and claim the next one.
 
-Write plausible original code, pure C (no inline asm). Be brief in your messages: work, don't narrate.
+Write plausible original code, pure C (no inline asm). The compilers are C89: declare every local at the top of its
+block, before any statement (assign it later), and no `for (int i = ...)`: a declaration after code is only reported
+as "syntax error before `x'". Be brief in your messages: work, don't narrate.
 """
 
 FORK_PROMPT = """\

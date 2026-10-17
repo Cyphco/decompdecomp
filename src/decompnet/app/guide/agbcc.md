@@ -3,6 +3,9 @@
 agbcc is pret's rebuild of the GCC 2.95-era compiler most GBA games used (`old_agbcc` for some early
 games, `agbcc_arm` for ARM code). Typical flags `-mthumb-interwork -O2`; the project sets them per file.
 
+C89, not C99: every local is declared at the top of its block, before any statement (no declarations after code,
+no `for (int i = 0; ...)`). Otherwise the compiler only says "syntax error before `x'" and nothing compiles.
+
 What moves the output
 - Local declaration order and first use change register allocation. Reorder before rewriting.
 - Narrow types: every `u8`/`s16` local or parameter gets truncation shifts after arithmetic; `int`

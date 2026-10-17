@@ -66,6 +66,38 @@ def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def same_source(a: str | None, b: str | None) -> bool:
+    """Whether two submissions are the same C apart from spacing."""
+    return bool(a) and bool(b) and "".join(a.split()) == "".join(b.split())
+
+
+_DECL = re.compile(r"^\s*(?:(?:const|volatile|unsigned|signed|static|register)\s+)*(?:struct\s+\w+\s+|enum\s+\w+\s+)?"
+                   r"[A-Za-z_]\w*[\s*]+(\w+)\s*(?:=|;|\[|,)")
+_C99_FOR = re.compile(r"\bfor\s*\(\s*(?:const\s+)?(?:u8|u16|u32|u64|s8|s16|s32|s64|int|unsigned|char|short|long)\b")
+
+
+def compile_hints(source: str, log: str) -> str:
+    """What the compiler's message doesn't say: agbcc and the other period compilers are C89, and a model that writes
+    modern C gets only "syntax error before `x'" for a declaration after a statement or `for (int i...)`, which weaker
+    models can't read, and send the same code again."""
+    lines = source.splitlines()
+    why = []
+    for n, ident in re.findall(r"func\.c:(\d+): syntax error before [`'\"]?(\w+)", log):
+        text = lines[int(n) - 1] if 0 < int(n) <= len(lines) else ""
+        if ident not in text:  # the context header's lines are not counted in the message: find the line by name
+            text = next((ln for ln in lines if re.search(rf"\b{re.escape(ident)}\b", ln)), "")
+        if _C99_FOR.search(text):
+            why.append("`for (int i = ...)`: declare the loop variable at the top of the function")
+        elif (m := _DECL.match(text)) and m.group(1) == ident:
+            why.append(f"`{text.strip()[:60]}` declares a variable after a statement")
+    if not why and not log:  # a repeat of a failure: say it once, in general
+        return " (this compiler is C89: every local is declared at the top of its block, before any statement)"
+    if not why:
+        return ""
+    return ("\nHINT: this compiler is C89. Declare every local at the top of its block, before any statement (assign it "
+            "later), and no `for (int i...)`. Found: " + "; ".join(dict.fromkeys(why)))
+
+
 def _clip(text: str, limit: int = NOTE_CHARS) -> str:
     return text if len(text) <= limit else text[:limit].rstrip() + f" … [{len(text) - limit} more characters]"
 
@@ -403,12 +435,22 @@ class Network:
                 else:
                     db.execute("UPDATE claims SET expires_at=? WHERE function_id=?", (now + self.claim_ttl, fn["id"]))
 
+        last = self.store.one("SELECT source, score FROM attempts WHERE function_id=? AND agent_id=? ORDER BY id DESC LIMIT 1",
+                              fn["id"], agent.id)
+        if last is not None and last["score"] is None and same_source(last["source"], source):
+            # weaker models sent the same C that failed to compile again and again (eight times in a row on one function)
+            return {"text": f"❌ This is the same C as your last attempt on {fn['name']}, which didn't compile, so it "
+                            f"would fail the same way (not compiled again). Change what the compiler complained about"
+                            f"{compile_hints(source, '')}.{self.stall_note(fn['id'], agent.id)}", "score": None, "matched": False}
+
         ctx = self._context(proj["id"], fn["unit"])
         result = self._compile(proj, ctx["header"], source, fn)
 
         if not result.ok:
             self._record(fn, agent, None, source, ctx["version"])
-            return {"text": f"❌ COMPILE ERROR (context v{ctx['version']})\n{result.log.strip()}", "score": None, "matched": False}
+            return {"text": f"❌ COMPILE ERROR (context v{ctx['version']})\n{result.log.strip()}"
+                            f"{compile_hints(source, result.log)}{self.stall_note(fn['id'], agent.id)}",
+                    "score": None, "matched": False}
 
         cand, verdict, problems = self._evaluate(fn, proj, result.obj)
         if cand is None:
