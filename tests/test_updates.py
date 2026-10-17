@@ -212,3 +212,42 @@ def test_an_install_from_main_updates_on_every_commit():
     assert (cur["channel"], cur["branch"], cur["commit"]) == ("branch", "main", "abc123")
     updates.record("branch", branch="window-fix", commit="abc123")
     assert updates.installed()["branch"] == "window-fix"
+
+
+def test_an_update_remembers_what_it_replaced_and_rollback_goes_back(monkeypatch, tmp_path):
+    old, new = "1" * 40, "2" * 40
+    updates.record("branch", "main", old)
+    uv = tmp_path / "uv"
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    uv.write_text(f"#!/bin/sh\necho \"$@\" >> {tmp_path / 'calls'}\nif [ \"$2\" = dir ]; then echo {bindir}; fi\n")
+    (bindir / "decomp").write_text("#!/bin/sh\nexit 0\n")
+    for f in (uv, bindir / "decomp"):
+        f.chmod(f.stat().st_mode | stat.S_IEXEC)
+    if sys.platform == "win32":
+        pytest.skip("shell stubs: run in WSL or Linux")
+    monkeypatch.setattr(updates, "uv", lambda: str(uv))
+    found = {"current": updates.installed(), "available": True, "latest": {"version": "9", "commit": new},
+             "spec": f"decompnet @ https://github.com/{updates.REPO}/archive/{new}.tar.gz"}
+    after = updates.install(found, log=lambda *_: None)
+    assert (after["commit"], after["previous"]) == (new, old)
+
+    back = updates.rollback(log=lambda *_: None)
+    assert (back["commit"], back["previous"]) == (old, new)  # again: it returns to the newer one
+    assert f"archive/{old}.tar.gz" in (tmp_path / "calls").read_text()
+    assert updates.installed()["commit"] == old
+
+
+def test_rollback_needs_an_earlier_version(monkeypatch):
+    monkeypatch.setattr(updates, "can_apply", lambda: (True, ""))
+    updates.record("branch", "main", "1" * 40)
+    with pytest.raises(RuntimeError, match="no earlier version"):
+        updates.rollback(log=lambda *_: None)
+
+
+def test_an_installer_recording_a_newer_commit_keeps_the_one_before():
+    updates.record("branch", "main", "1" * 40)
+    updates.record("branch", "main", "2" * 40)  # `decomp install-info` after installing a build
+    assert updates.installed()["previous"] == "1" * 40
+    updates.record("branch", "main", "2" * 40)  # recorded again: still the same one
+    assert updates.installed()["previous"] == "1" * 40

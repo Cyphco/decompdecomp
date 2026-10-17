@@ -53,6 +53,12 @@ def record(channel: str = "branch", branch: str = "", commit: str = "", repo: st
     """Remember where this copy came from. `channel` is kept for older installers: every install follows a branch."""
     data = {"channel": "branch", "repo": repo or REPO, "branch": branch or "main", "commit": commit,
             "version": __version__, "t": time.time()}
+    try:  # an installer re-recording where this came from keeps what update --rollback goes back to
+        old = json.loads(info_file().read_text(encoding="utf-8"))
+        if isinstance(old, dict):
+            data["previous"] = old["commit"] if old.get("commit") and old["commit"] != commit else old.get("previous", "")
+    except (OSError, ValueError):
+        pass
     info_file().parent.mkdir(parents=True, exist_ok=True)
     info_file().write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return data
@@ -170,7 +176,33 @@ def install(found: dict, log=print) -> dict:
     _stream([str(decomp), "setup"], log, "setting up the new version's tools failed")
     data = {"channel": "branch", "repo": cur.get("repo") or REPO, "branch": cur.get("branch") or "",
             "commit": found["latest"].get("commit") or "", "version": found["latest"].get("version") or "",
-            "t": time.time()}
+            "previous": cur.get("commit") or "", "t": time.time()}  # `previous`: what `decomp update --rollback` returns to
+    info_file().write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return data
+
+
+def rollback(log=print) -> dict:
+    """Go back to the commit that was installed before the last update (updates now follow every commit of main, so a
+    bad one needs an undo). Installs only: the running app keeps the code it started with until it restarts. Doing it
+    twice undoes the rollback."""
+    ok, why = can_apply()
+    if not ok:
+        raise RuntimeError(why)
+    cur = installed()
+    target = cur.get("previous") or ""
+    if not re.fullmatch(r"[0-9a-f]{7,40}", target):
+        raise RuntimeError("there's no earlier version to go back to: this one was installed first, or by an installer "
+                           "that didn't record it")
+    log(f"going back to {cur['repo']} @ {target[:7]} (from {(cur.get('commit') or '?')[:7]})")
+    _stream([uv(), "tool", "install", "--force", "--python", "3.12",
+             f"decompnet @ https://github.com/{cur['repo']}/archive/{target}.tar.gz"], log, "reinstalling failed")
+    bindir = subprocess.run([uv(), "tool", "dir", "--bin"], capture_output=True, text=True).stdout.strip()
+    decomp = Path(bindir) / "decomp" if bindir else None
+    if not decomp or not decomp.exists():
+        raise RuntimeError("it was reinstalled, but its decomp command isn't there")
+    _stream([str(decomp), "setup"], log, "setting up the older version's tools failed")
+    data = {"channel": "branch", "repo": cur["repo"], "branch": cur.get("branch") or "main", "commit": target,
+            "version": cur["version"], "previous": cur.get("commit") or "", "t": time.time()}
     info_file().write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return data
 

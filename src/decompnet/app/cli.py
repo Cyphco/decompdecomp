@@ -211,6 +211,15 @@ def update_cmd(args) -> int:
     """Look for a newer decompdecomp and install it (the running app restarts into it)."""
     from . import updates
 
+    if args.rollback:  # the commit installed before this one; the running app restarts into it by itself later
+        try:
+            data = updates.rollback(log=print)
+        except RuntimeError as e:
+            print(e)
+            return 1
+        print(f"back at {data['commit'][:7]}: quit decompdecomp and start it again to run it "
+              "(run this again to return to the newer one)")
+        return 0
     state_file = home_dir() / ".decomp" / "server.json"
     running = None
     try:
@@ -463,11 +472,12 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("url", help="print the address that opens the app (starts it if needed)")
     up = sub.add_parser("update", help="install the newest decompdecomp (the running app restarts into it)")
     up.add_argument("--check", action="store_true", help="only say whether there is one")
+    up.add_argument("--rollback", action="store_true", help="go back to the version installed before this one")
     ii = sub.add_parser("install-info", help=argparse.SUPPRESS)  # the installers: where updates come from
-    ii.add_argument("--channel", choices=["release", "branch"], default="release")
+    ii.add_argument("--channel", choices=["release", "branch"], default="branch")
     ii.add_argument("--branch", default="")
     ii.add_argument("--commit", default="")
-    ii.add_argument("--repo", default="n-delic/decompdecomp")
+    ii.add_argument("--repo", default="Cyphco/decompdecomp")
     c = sub.add_parser("connect", help="give your AI agents (Claude Code, Codex, Antigravity CLI, opencode) decompdecomp's tools")
     c.add_argument("agents", nargs="*", metavar="agent", help="claude, codex, antigravity (agy) or opencode (default: every one installed)")
     c.add_argument("--list", action="store_true", help="only show which are connected")
