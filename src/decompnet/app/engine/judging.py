@@ -131,6 +131,56 @@ class JudgeMixin:
             out.append(f"### {name}\n{res['text']}")
         return f"{matched} of {len(names)} matched.\n\n" + "\n\n".join(out)
 
+    MAX_VARIANTS = 8
+
+    def try_variants(self, agent: Agent, function: str, sources: list[str], project: str | None = None) -> str:
+        """Judge several spellings of one function in a single call, for the cost of one turn: each is compiled and
+        scored, the lowest score is recorded as the agent's attempt (so a byte-identical one matches and is credited,
+        the best one is kept as the best attempt) and its diff is shown, with a line for each of the others. Agents
+        otherwise tried spellings one call at a time, or ran the compiler by hand in a shell."""
+        if self.fork_slug(project):
+            raise NetworkError("compile_variants is for ROM projects: a fork's file is built one definition at a time, "
+                               "use compile_and_diff")
+        if isinstance(sources, str):
+            sources = [sources]
+        sources = [s for s in sources if isinstance(s, str) and s.strip()]
+        if not sources:
+            raise NetworkError("send the variants as a list of complete C sources")
+        if len(sources) > self.MAX_VARIANTS:
+            raise NetworkError(f"at most {self.MAX_VARIANTS} variants at once (got {len(sources)})")
+        fn = self._function(function, project)
+        proj = self.store.one("SELECT * FROM projects WHERE id=?", fn["project_id"])
+        claim = self.store.one("SELECT agent_id FROM claims WHERE function_id=?", fn["id"])
+        if fn["status"] != "matched" and claim is not None and claim["agent_id"] != agent.id:
+            raise NetworkError(f"{fn['name']} is claimed by {self._agent_name(claim['agent_id'])}")
+        if len(sources) == 1:
+            return self.attempt(agent, function, sources[0], project)["text"]
+        ctx = self._context(proj["id"], fn["unit"])
+        target = self._target_obj(fn, proj)
+        lines, scored = [], []
+        for k, source in enumerate(sources, 1):
+            result = self._compile(proj, ctx["header"], source, fn)
+            if not result.ok:
+                first = next((ln for ln in result.log.strip().splitlines() if "error" in ln.lower()), result.log.strip()[:120])
+                lines.append(f"variant {k}: did not compile: {first.strip()[:140]}")
+                continue
+            cand, verdict, _problems = self._evaluate(fn, proj, result.obj)
+            if cand is None:
+                lines.append(f"variant {k}: compiled, but no function named `{fn['name']}`")
+                continue
+            d = scoring.diff(target, cand)
+            if verdict is not None:
+                d = scoring.DiffResult(0 if verdict else max(1, d.score), d.max_score, d.rows, verdict)
+            scored.append((d.score, k))
+            lines.append(f"variant {k}: score {d.score} ({scoring.percent_text(d.percent)} match, {len([r for r in d.rows if r[2]])} insns)")
+        if not scored:  # nothing compiled: record the first, so its error and the stall count reach the agent
+            res = self.attempt(agent, function, sources[0], project)
+            return "\n".join(lines) + "\n\nVariant 1, recorded:\n" + res["text"]
+        _, best = min(scored)
+        lines[best - 1] += "  <- best"
+        res = self.attempt(agent, function, sources[best - 1], project)
+        return "\n".join(lines) + f"\n\nBest (variant {best}), recorded as your attempt:\n{res['text']}"
+
     def _yield_autopilot(self, function: str | None, project: str | None) -> None:
         """The autopilot holds a function only while its draft compiles: an agent that wants it waits for that."""
         if not function:

@@ -67,7 +67,9 @@ Use only the decomp tools. Repeat for up to {count} claims (a batch is one), the
    attempt and notes (start from those!), a machine-generated draft, and identical matched code if any.
 2. get_context() shows the shared header every compile includes.
 3. Write the C functions (same names as the assembly) and judge them: compile_and_diff(function="a, b, c",
-   source=all the definitions) for a batch, one name for one. Read the diff: '<' '>' missing/extra
+   source=all the definitions) for a batch, one name for one. Unsure between spellings of one function (statement
+   order, types, loop shape)? compile_variants(function, sources=[...up to 8 complete definitions]) judges them all in
+   one call and records the best. Read the diff: '<' '>' missing/extra
    instructions, 'i' operands, 'o' order, 'r' registers, 's' stack. Fix structure first, registers last.
    The workflow and {compiler_guide} guides are below. find_similar(function) shows look-alike functions;
    a matched one is the best starting point.
@@ -192,6 +194,7 @@ HANDLERS: dict[str, Callable[..., str]] = {
         _claim(net, agent, slug, function, strategy, count),
     "get_function": lambda net, agent, slug, function: net.get_function(function, slug, agent),
     "compile_and_diff": lambda net, agent, slug, function, source: _compile(net, agent, slug, function, source),
+    "compile_variants": lambda net, agent, slug, function, sources: net.try_variants(agent, function, sources, slug),
     "release_function": lambda net, agent, slug, function, notes: net.release(agent, function, notes, slug),
     "get_context": lambda net, agent, slug, function="": net.get_context(slug, function or None),
     "edit_context": lambda net, agent, slug, old, new, message, function="":
@@ -313,6 +316,14 @@ def build_mcp(net: RomNetwork, agent_of: Callable[[Context], tuple[Agent, str]])
         built with the project's build system and diffed with objdiff. Several functions ("a, b, c"): send all
         their definitions in one source; each is judged on its own."""
         return await run(ctx, "compile_and_diff", function=function, source=source)
+
+    @mcp.tool(meta=ALWAYS_LOAD)
+    async def compile_variants(ctx: Context, function: str, sources: list[str]) -> str:
+        """Judge up to 8 spellings of ONE function in a single call (ROM projects). Each is compiled and scored;
+        the best one is recorded as your attempt (byte-identical = matched) and its diff is shown, the others get
+        one line (score, or why it didn't compile). Use it when you're choosing between ways to write the same
+        thing: statement order, types, loop shape, temporaries. It costs one turn, not one per spelling."""
+        return await run(ctx, "compile_variants", function=function, sources=sources)
 
     @mcp.tool(meta=ALWAYS_LOAD)
     async def release_function(ctx: Context, function: str, notes: str = "", text: str = "") -> str:

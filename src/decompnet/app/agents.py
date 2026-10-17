@@ -1137,7 +1137,7 @@ class Manager:
                 if kind == "tool":
                     name = text.split("(", 1)[0].lower()
                     s.shell_calls += name.startswith(("bash", "shell"))
-                    if any(k in name for k in ("compile_and_diff", "claim_function", "add_note", "release_function")):
+                    if any(k in name for k in ("compile_and_diff", "compile_variants", "claim_function", "add_note", "release_function")):
                         s.last_progress = time.time()
                 said.append(text)
                 if kind == "error":
@@ -1333,6 +1333,11 @@ def api_tool_schemas(fork: bool = False) -> list[dict]:
         "compile_and_diff": ("Compile C for the function, link it at its address and diff against the ROM. "
                              "Score 0 = matched. Several functions: names comma-separated, all definitions in source.",
                              s(function=st("function name, or several: a, b, c", True), source=st("C source", True))),
+        "compile_variants": ("Judge up to 8 spellings of ONE function in a single call: the best is recorded as your "
+                             "attempt (score 0 = matched), the others get one line each.",
+                             s(function=st("function name", True),
+                               sources={"type": "array", "items": {"type": "string"}, "req": True,
+                                        "description": "2 to 8 complete C definitions of that function"})),
         "release_function": ("Give up a function with notes for the next agent.",
                              s(function=st("function", True), notes=st("what you tried, what is left", True))),
         "get_context": ("The shared header included in every compile.", s()),

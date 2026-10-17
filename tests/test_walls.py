@@ -72,3 +72,67 @@ def test_the_same_failing_source_is_recognised_whatever_its_spacing():
     assert same_source("void f(void) {\n  g();\n}\n", "void f(void){ g(); }")
     assert not same_source("void f(void) { g(); }", "void f(void) { h(); }")
     assert not same_source(None, "x") and not same_source("", "")
+
+
+class _Compiled:
+    def __init__(self, source):
+        self.ok = not source.startswith("bad")
+        self.obj = int(source[1:]) if self.ok else None
+        self.log = "func.c:1: syntax error before `x'" if not self.ok else ""
+
+
+def _judge_net(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from decompnet import scoring
+    from decompnet.app.engine import RomNetwork
+
+    n = RomNetwork(tmp_path / "t.db", tmp_path)
+    with n.store.tx() as db:
+        db.execute("INSERT INTO projects(id,slug,name,arch,root,config) VALUES(1,'p','P','arm','.',?)", (json.dumps({}),))
+        db.execute("INSERT INTO functions(project_id,name,vram,n_insns) VALUES(1,'f',4096,5)")
+    n._context = lambda pid, unit: {"header": "", "version": 1}
+    n._target_obj = lambda fn, proj: None
+    n._compile = lambda proj, header, source, fn=None: _Compiled(source)
+    n._evaluate = lambda fn, proj, obj: (obj, None, [])
+    monkeypatch.setattr(scoring, "diff", lambda target, cand: SimpleNamespace(
+        score=cand, max_score=100, rows=[(" ", "a", "a")], percent=100 - cand, bytes_match=cand == 0, verdict=None))
+    recorded = []
+    n.attempt = lambda agent, function, source, project=None: recorded.append(source) or {"text": f"RECORDED {source}"}
+    return n, recorded
+
+
+def test_variants_are_judged_together_and_the_best_is_recorded(tmp_path, monkeypatch):
+    n, recorded = _judge_net(tmp_path, monkeypatch)
+    agent = n.authenticate(n.register_agent("a", "a"))
+    out = n.try_variants(agent, "f", ["s10", "bad1", "s3", "s7"], "p")
+    assert "variant 1: score 10" in out and "variant 2: did not compile" in out and "variant 3: score 3" in out
+    assert "variant 3" in out.splitlines()[2] and "<- best" in out.splitlines()[2]
+    assert recorded == ["s3"] and "RECORDED s3" in out  # only the best is recorded, as the agent's attempt
+    n.try_variants(agent, "f", ["bad1", "bad2"], "p")
+    assert recorded[-1] == "bad1"  # nothing compiled: the first, so its error and the stall count reach the agent
+    assert n.try_variants(agent, "f", ["s5"], "p") == "RECORDED s5"  # one is just compile_and_diff
+
+
+def test_variants_have_limits_and_respect_claims(tmp_path, monkeypatch):
+    from decompnet.network import NetworkError
+
+    n, _ = _judge_net(tmp_path, monkeypatch)
+    a = n.authenticate(n.register_agent("a", "a"))
+    b = n.authenticate(n.register_agent("b", "b"))
+    with pytest.raises(NetworkError, match="at most 8"):
+        n.try_variants(a, "f", [f"s{k}" for k in range(9)], "p")
+    with pytest.raises(NetworkError, match="list of complete C sources"):
+        n.try_variants(a, "f", ["", "  "], "p")
+    with n.store.tx() as db:
+        db.execute("INSERT INTO claims VALUES(1,?,0,9999999999)", (b.id,))
+    with pytest.raises(NetworkError, match="claimed by"):
+        n.try_variants(a, "f", ["s1", "s2"], "p")
+
+
+def test_the_variants_tool_is_offered_to_cli_and_api_agents():
+    from decompnet.app import agents, tools
+
+    assert "compile_variants" in tools.HANDLERS
+    schema = next(t for t in agents.api_tool_schemas() if t["function"]["name"] == "compile_variants")["function"]["parameters"]
+    assert schema["properties"]["sources"]["type"] == "array" and set(schema["required"]) == {"function", "sources"}
