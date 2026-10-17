@@ -134,6 +134,20 @@ def register(app: App) -> None:
             return fail(e)
         return JSONResponse({"agent": agent.name, "token": token, "url": mcp_url})
 
+    @mcp.custom_route("/api/agents/log", methods=["GET"])
+    async def api_agents_log(request: Request) -> Response:
+        """One helper's log (its tail), or with no id the list of logs on disk: what the agent printed, its stderr, the
+        command and prompt it was given, why it stopped."""
+        if (bad := guard(request)):
+            return bad
+        sid = request.query_params.get("id", "")
+        try:
+            if not sid:
+                return JSONResponse({"logs": manager.logs()})
+            return JSONResponse(manager.read_log(sid, int(request.query_params.get("tail") or 200_000)))
+        except (ValueError, OSError) as e:
+            return fail(e)
+
     @mcp.custom_route("/api/agents/stop", methods=["POST"])
     async def api_agents_stop(request: Request) -> Response:
         if (bad := guard(request, write=True)):

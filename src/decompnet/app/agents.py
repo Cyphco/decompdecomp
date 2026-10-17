@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -537,6 +538,10 @@ def parse_line(kind: str, line: str, state: dict | None = None) -> list[tuple[st
 
 # ---------------------------------------------------------------------------------- sessions
 
+LOG_MAX = 4_000_000  # bytes a helper's log grows to before it rolls over
+LOG_LINE = 20000  # characters kept of one line (a tool's whole output can be one)
+
+
 @dataclass
 class Session:
     id: str
@@ -558,8 +563,33 @@ class Session:
     signed_out: bool = False  # the agent CLI isn't signed in: trying again won't help
     throttled: bool = False  # the last run ended on the provider's limit of requests at once: not a failure
     limited: bool = False  # the last run ended on the plan's usage limit: wait for it to reset (LIMIT_WAIT)
+    log_path: Path | None = None  # everything this helper said and the agent printed, for debugging (see raw)
+    secrets: list = field(default_factory=list)  # tokens and keys the log must never hold
+    _loglock: threading.Lock = field(default_factory=threading.Lock)
+
+    def raw(self, tag: str, text: str) -> None:
+        """Append to this helper's log file: timestamped, one line per line, secrets blanked, rolled over at LOG_MAX
+        (the old half kept as .log.1). Unlike the feed (the last 400 events, 4000 characters each, gone when the app
+        quits) it holds the agent's raw output and stderr, the command and the prompt."""
+        if self.log_path is None:
+            return
+        for secret in self.secrets:
+            if secret:
+                text = text.replace(secret, "***")
+        stamp = time.strftime("%H:%M:%S")
+        with self._loglock:
+            try:
+                self.log_path.parent.mkdir(parents=True, exist_ok=True)
+                if self.log_path.exists() and self.log_path.stat().st_size > LOG_MAX:
+                    self.log_path.replace(self.log_path.with_name(self.log_path.name + ".1"))
+                with self.log_path.open("a", encoding="utf-8", errors="replace", newline="\n") as f:
+                    for line in (text.splitlines() or [""]):
+                        f.write(f"{stamp} {tag:<6} {line[:LOG_LINE]}\n")
+            except OSError:  # a log that can't be written must never stop the helper
+                pass
 
     def push(self, kind: str, text: str) -> None:
+        self.raw(kind, text)
         self.seq += 1
         self.feed.append({"seq": self.seq, "t": time.time(), "type": kind, "text": text[:4000]})
         if kind in ("info", "error"):  # starts, waits, stops and errors outlive the session: why a night went as it did
@@ -581,6 +611,7 @@ class Manager:
         self._prep: dict[str, threading.Event] = {}  # slug -> giving its code source files before agents claim
         self.on_stop = lambda: None  # set by the server: close tunnels when the app quits
         self.persist = lambda running: None  # set by the server: remember helpers to resume after a restart
+        self.log_dir = home / "agent-logs"
 
     # -- control
 
@@ -610,6 +641,9 @@ class Manager:
                 name = helper_name(kind, options.get("model") or _config_model(kind),
                                    {s.agent_name for s in self.sessions.values()})
                 s = Session(sid, kind, label, slug, name, dict(options))
+                s.log_path = self.log_dir / f"{sid}.log"
+                s.secrets.append(options.get("api_key") or "")
+                s.raw("start", f"{label} on {slug} as {name}, model {options.get('model') or 'default'}")
                 self.sessions[sid] = s
                 threading.Thread(target=self._run, args=(s,), daemon=True, name=f"agent-{sid}").start()
                 ids.append(sid)
@@ -679,6 +713,31 @@ class Manager:
     def snapshot(self, since: dict | None = None) -> list[dict]:
         since = since or {}
         return [s.snapshot(int(since.get(s.id, 0))) for s in self.sessions.values()]
+
+    def logs(self) -> list[dict]:
+        """The log files on disk, newest first (they outlive the sessions: after a restart, or once one is removed)."""
+        out = []
+        for p in self.log_dir.glob("*.log") if self.log_dir.is_dir() else []:
+            st = p.stat()
+            s = self.sessions.get(p.stem)
+            out.append({"id": p.stem, "label": s.label if s else p.stem, "state": s.state if s else "ended",
+                        "size": st.st_size, "t": st.st_mtime})
+        return sorted(out, key=lambda r: -r["t"])
+
+    def read_log(self, sid: str, tail: int = 200_000) -> dict:
+        """The end of one helper's log (`tail` bytes, from a line start)."""
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", sid or ""):
+            raise ValueError("no such log")
+        p = self.log_dir / f"{sid}.log"
+        if not p.is_file():
+            raise ValueError(f"no log for {sid}: it has not run yet, or its log was deleted")
+        size = p.stat().st_size
+        with p.open("rb") as f:
+            f.seek(max(0, size - tail))
+            data = f.read().decode("utf-8", "replace")
+        if size > tail:
+            data = data.split("\n", 1)[-1]
+        return {"id": sid, "size": size, "truncated": size > tail, "text": data, "path": str(p)}
 
     def project_of(self, agent_id: int) -> str | None:
         return self.assignments.get(agent_id)
@@ -920,6 +979,9 @@ class Manager:
                 raise Fatal("Antigravity CLI only loads the MCP servers in your own settings: connect it to decompdecomp "
                             "once (Connect your agent, or `decomp connect antigravity`), then start the helpers again")
         cmd, env, prompt = self._command(s, token, workdir)
+        s.secrets.append(token)
+        s.raw("cmd", shlex.join(str(c) for c in cmd))
+        s.raw("prompt", prompt)
         s.push("info", f"session {s.runs}: {KINDS[s.kind].name} started")
         flags = subprocess.CREATE_NEW_PROCESS_GROUP if WIN else 0
         proc = subprocess.Popen(cmd, cwd=workdir, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -937,6 +999,7 @@ class Manager:
 
         def drain_err():
             for line in proc.stderr:
+                s.raw("err", line.rstrip("\n"))
                 if (text := clean_stderr(s.kind, line)) and (not errors or errors[-1] != text):
                     errors.append(text)
         threading.Thread(target=feed_prompt, daemon=True).start()
@@ -946,6 +1009,7 @@ class Manager:
         state: dict = {}
         last_error = refused = ""
         for line in proc.stdout:
+            s.raw("out", line.rstrip("\n"))
             for kind, text in parse_line(s.kind, line, state):
                 if kind == "usage":
                     self._account(s, json.loads(text))
@@ -961,6 +1025,7 @@ class Manager:
                 break
         code = proc.wait()
         s.proc = None
+        s.raw("exit", f"code {code}, saw a tool: {saw_tool}")
         if refused and not s.stop.is_set():
             raise Fatal(refused)  # every retry would be refused the same way
         if not s.stop.is_set() and _LIMIT.search(" ".join([*said, *errors])):

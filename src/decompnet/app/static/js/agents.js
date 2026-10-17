@@ -50,6 +50,7 @@ function renderSessions(sessions) {
       s.usd ? money(s.usd) : s.tokens ? `${(s.tokens / 1000).toFixed(0)}k tokens` : "", s.started_at ? `since ${clock(s.started_at).slice(0, 5)}` : ""].filter(Boolean);
     return `<div class="session"><div class="session-top"><span class="dot ${dot}"></span><b>${esc(s.label)}</b>
         <span class="state ${s.state === "error" ? "err" : ""}">${esc(STATE_TEXT[s.state] || s.state)}</span>
+        <button class="ghost" data-log="${esc(s.id)}" type="button">Log</button>
         <button class="ghost" data-stop="${esc(s.id)}" data-remove="${live ? "" : "1"}" type="button">${live ? "Stop" : "Remove"}</button></div>
       <span class="facts-line">${facts.join(" · ")}</span>
       ${s.state === "error" ? `<span class="state err">${esc(s.error)}</span>` : ""}
@@ -61,6 +62,7 @@ function renderSessions(sessions) {
       <span class="last">on ${S.claims.filter((c) => c.agent === a).map((c) => fnLink(c.name)).join(", ")}</span></div>`).join(""));
   box.querySelectorAll(".fn").forEach((x) => { x.onclick = () => openFn(x.dataset.fn); });
   $("noSessions").hidden = sessions.length + outside.length > 0;
+  box.querySelectorAll("[data-log]").forEach((b) => { b.onclick = () => openAgentLog(b.dataset.log); });
   box.querySelectorAll("[data-stop]").forEach((b) => {
     b.onclick = async () => {
       await api("/api/agents/stop", { method: "POST", body: { id: b.dataset.stop, remove: !!b.dataset.remove } }).catch((e) => toast(esc(e.message), "err"));
@@ -68,6 +70,45 @@ function renderSessions(sessions) {
     };
   });
 }
+
+/* A helper's log, for debugging: what the agent printed (raw), its stderr, the command and prompt it was given, and why it
+   stopped. Kept on disk, so it's here after a restart too. */
+async function openAgentLog(id) {
+  const body = dialog(`Log: ${id}`, `<p class="muted small" id="logMeta">Loading…</p>
+    <div class="row"><button class="ghost small-btn" id="logRefresh" type="button">Refresh</button>
+      <button class="ghost small-btn" id="logCopy" type="button">Copy</button>
+      <label class="check small"><input type="checkbox" id="logErrs"><span>Only errors and exits</span></label></div>
+    <pre class="agent-log" id="logText"></pre>`);
+  let text = "";
+  const show = () => {
+    const only = $("logErrs").checked;
+    const lines = text.split("\n").filter((l) => !only || /^\S+ (err|error|exit|start)\s/.test(l) || /error|exited|503|429|failed/i.test(l));
+    const pre = $("logText");
+    pre.textContent = lines.join("\n");
+    pre.scrollTop = pre.scrollHeight;
+  };
+  const load = async () => {
+    try {
+      const r = await api(`/api/agents/log?id=${encodeURIComponent(id)}`);
+      text = r.text;
+      $("logMeta").textContent = `${(r.size / 1024).toFixed(0)} KB${r.truncated ? " (the end of it)" : ""} · ${r.path}`;
+      show();
+    } catch (e) { $("logMeta").textContent = e.message; }
+  };
+  $("logRefresh").onclick = load;
+  $("logErrs").onchange = show;
+  $("logCopy").onclick = () => navigator.clipboard.writeText(text).then(() => toast("Log copied."));
+  await load();
+}
+$("allLogs").onclick = async () => {
+  const body = dialog("Agent logs", `<p class="muted small">One file per helper, kept after it stops or the app restarts.</p><div id="logList"></div>`);
+  try {
+    const { logs } = await api("/api/agents/log");
+    setHtml($("logList"), logs.length ? logs.map((l) => `<div class="line-item"><div class="txt"><b>${esc(l.label)}</b><span class="mono">${esc(l.state)} · ${(l.size / 1024).toFixed(0)} KB · ${new Date(l.t * 1000).toLocaleString()}</span></div>
+      <button class="ghost small-btn" data-open="${esc(l.id)}" type="button">Open</button></div>`).join("") : `<p class="muted small">No helper has run yet.</p>`);
+    body.querySelectorAll("[data-open]").forEach((b) => { b.onclick = () => openAgentLog(b.dataset.open); });
+  } catch (e) { $("logList").textContent = e.message; }
+};
 $("stopAll").onclick = async () => {
   await api("/api/agents/stop", { method: "POST", body: { slug: S.slug } }).catch((e) => toast(esc(e.message), "err"));
   toast("Stopping every agent on this project.");
