@@ -192,7 +192,8 @@ HANDLERS: dict[str, Callable[..., str]] = {
     "project_info": lambda net, agent, slug: project_info(net, slug),
     "claim_function": lambda net, agent, slug, function="", strategy="", count=1:
         _claim(net, agent, slug, function, strategy, count),
-    "get_function": lambda net, agent, slug, function: net.get_function(function, slug, agent),
+    "get_function": lambda net, agent, slug, function, start_line=0, max_lines=0:
+        net.get_function(function, slug, agent, start_line, max_lines),
     "compile_and_diff": lambda net, agent, slug, function, source: _compile(net, agent, slug, function, source),
     "compile_variants": lambda net, agent, slug, function, sources: net.try_variants(agent, function, sources, slug),
     "release_function": lambda net, agent, slug, function, notes: net.release(agent, function, notes, slug),
@@ -301,10 +302,11 @@ def build_mcp(net: RomNetwork, agent_of: Callable[[Context], tuple[Agent, str]])
         return await run(ctx, "claim_function", function=function, strategy=strategy, count=count)
 
     @mcp.tool(meta=ALWAYS_LOAD)
-    async def get_function(ctx: Context, function: str) -> str:
+    async def get_function(ctx: Context, function: str, start_line: int = 0, max_lines: int = 0) -> str:
         """Show any function (by name or address): assembly, status, best attempt, notes. Read matched
-        functions to learn how this codebase is written."""
-        return await run(ctx, "get_function", function=function)
+        functions to learn how this codebase is written. A long function's assembly comes in parts of 500 lines:
+        start_line and max_lines pick another part."""
+        return await run(ctx, "get_function", function=function, start_line=start_line, max_lines=max_lines)
 
     @mcp.tool(meta=ALWAYS_LOAD)
     async def compile_and_diff(ctx: Context, function: str, source: str) -> str:

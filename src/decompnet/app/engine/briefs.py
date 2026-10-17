@@ -73,7 +73,7 @@ class BriefMixin:
         self._rom_only(project, "get_context")
         return super().get_context(project, function)
 
-    def _brief(self, fn, agent, header):
+    def _brief(self, fn, agent, header, asm_from=0, asm_lines=0):
         if self.cfg(self.store.one("SELECT config FROM projects WHERE id=?", fn["project_id"])).get("kind") == "fork":
             return self.forks.brief(fn, agent, header)
         proj = self.store.one("SELECT * FROM projects WHERE id=?", fn["project_id"])
@@ -81,7 +81,7 @@ class BriefMixin:
             with self._seed_lock:
                 self._seed_for(self._function(fn["name"], proj["slug"]), proj)
             fn = self._function(fn["name"], proj["slug"])
-        return super()._brief(fn, agent, header)
+        return super()._brief(fn, agent, header, asm_from, asm_lines)
 
     def xrefs(self, proj) -> dict:
         """calls / called_by / uses / used_by, all keyed by address."""

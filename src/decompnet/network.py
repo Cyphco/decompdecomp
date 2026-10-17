@@ -29,6 +29,8 @@ RELEASE_COOLDOWN = 15 * 60
 # A function released this many times without a match is a wall (Harvest Moon GBA: the same ten functions were
 # re-claimed by session after session, each rediscovering the same dead end). Automatic claims leave it for last.
 WALL_ABANDONS = 6
+ASM_BRIEF_INSNS = 800  # a function longer than this is shown in parts, not whole (sub_080722F0: 6050 instructions, a claim of 122K characters)
+ASM_BRIEF_LINES = 500  # lines of assembly in a part
 NOTE_CHARS = 1500  # one note's share of a brief: the rest is in the notes' own words, a call away
 MACHINE_AGENTS = ("autopilot", "permuter")  # decompdecomp's own workers: their claims never mean "given up on"
 # Twins first (see app/twins.py): a function whose code the game has more than once (boost: how many more times)
@@ -351,10 +353,13 @@ class Network:
         return (f"Released {fn['name']}. Your best attempt and notes are saved so the next agent starts "
                 f"where you left off. Call claim_function for a new one.")
 
-    def get_function(self, function: str, project: str | None = None, agent: Agent | None = None) -> str:
-        return self._brief(self._function(function, project), agent, header="VIEW")
+    def get_function(self, function: str, project: str | None = None, agent: Agent | None = None,
+                     start_line: int = 0, max_lines: int = 0) -> str:
+        """`start_line`, `max_lines`: a part of a long function's assembly (its brief shows the first lines)."""
+        return self._brief(self._function(function, project), agent, header="VIEW",
+                           asm_from=max(0, int(start_line or 0)), asm_lines=max(0, int(max_lines or 0)))
 
-    def _brief(self, fn, agent: Agent | None, header: str) -> str:
+    def _brief(self, fn, agent: Agent | None, header: str, asm_from: int = 0, asm_lines: int = 0) -> str:
         proj = self.store.one("SELECT * FROM projects WHERE id=?", fn["project_id"])
         ctx = self._context(proj["id"], fn["unit"])
         claim = self.store.one("SELECT * FROM claims WHERE function_id=?", fn["id"])
@@ -376,7 +381,16 @@ class Network:
         if fn["status"] == "matched":
             lines += [f"MATCHED by {self._agent_name(fn['matched_agent_id'])} {_ago(fn['matched_at'])}:",
                       "```c", fn["matched_source"].strip(), "```"]
-        lines += ["", "### Target assembly", "```asm", scoring.compact_asm(self._asm_text(fn, proj)), "```"]
+        asm = scoring.compact_asm(self._asm_text(fn, proj)).splitlines()
+        limit = asm_lines or (ASM_BRIEF_LINES if (fn["n_insns"] or 0) > ASM_BRIEF_INSNS else 0)
+        if limit and (asm_from or len(asm) > limit):
+            part = asm[asm_from:asm_from + limit]
+            where = f"lines {asm_from + 1}-{asm_from + len(part)} of {len(asm)}"
+            if asm_from + limit < len(asm):
+                where += f"; the next part: get_function(\"{fn['name']}\", start_line={asm_from + limit}, max_lines={limit})"
+            lines += ["", f"### Target assembly ({where})", "```asm", "\n".join(part), "```"]
+        else:
+            lines += ["", "### Target assembly", "```asm", "\n".join(asm), "```"]
         lines += self._extra_brief(fn, proj)
         if fn["status"] != "matched":
             if fn["best_source"]:

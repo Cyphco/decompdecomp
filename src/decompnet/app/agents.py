@@ -1329,7 +1329,10 @@ def api_tool_schemas(fork: bool = False) -> list[dict]:
                            "notes and a draft. count > 1: a batch of small functions to judge together.",
                            s(function=st("optional name or address"), strategy=st("finish | easiest | closest | hardest | random"),
                              count=it("up to 6 small functions at once"))),
-        "get_function": ("Show any function by name or address.", s(function=st("name or address", True))),
+        "get_function": ("Show any function by name or address. A long function's assembly comes in parts: "
+                         "start_line and max_lines pick another part.",
+                         s(function=st("name or address", True), start_line=it("first line of the assembly to show"),
+                           max_lines=it("how many lines"))),
         "compile_and_diff": ("Compile C for the function, link it at its address and diff against the ROM. "
                              "Score 0 = matched. Several functions: names comma-separated, all definitions in source.",
                              s(function=st("function name, or several: a, b, c", True), source=st("C source", True))),

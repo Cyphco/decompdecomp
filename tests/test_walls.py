@@ -136,3 +136,25 @@ def test_the_variants_tool_is_offered_to_cli_and_api_agents():
     assert "compile_variants" in tools.HANDLERS
     schema = next(t for t in agents.api_tool_schemas() if t["function"]["name"] == "compile_variants")["function"]["parameters"]
     assert schema["properties"]["sources"]["type"] == "array" and set(schema["required"]) == {"function", "sources"}
+
+
+def test_a_long_functions_assembly_comes_in_parts(tmp_path, monkeypatch):
+    n = Network(tmp_path / "t.db")
+    with n.store.tx() as db:
+        db.execute("INSERT INTO projects(id,slug,name,arch,root,config) VALUES(1,'p','P','arm','.',?)",
+                   (json.dumps({"compiler": {"toolchain": "agbcc", "flags": ["-O2"]}}),))
+        db.execute("INSERT INTO functions(project_id,name,vram,n_insns) VALUES(1,'huge',4096,2000)")
+        db.execute("INSERT INTO functions(project_id,name,vram,n_insns) VALUES(1,'small',8192,10)")
+    n._context = lambda pid, unit: {"header": "", "version": 1}
+    monkeypatch.setattr(n, "_extra_brief", lambda fn, proj: [], raising=False)
+    n._asm_text = lambda fn, proj: "\n".join(f"  op{k} r0, r1" for k in range(1200))
+    agent = n.authenticate(n.register_agent("a", "a"))
+
+    brief = n.get_function("huge", "p", agent)
+    assert "lines 1-500 of 1200" in brief and "op499 " in brief and "op500 " not in brief
+    assert 'get_function("huge", start_line=500, max_lines=500)' in brief
+    part = n.get_function("huge", "p", agent, start_line=1000, max_lines=500)
+    assert "lines 1001-1200 of 1200" in part and "op1199 " in part and "the next part" not in part
+    assert "op0 " not in part
+    whole = n.get_function("small", "p", agent)  # short functions are shown whole, as before
+    assert "### Target assembly\n" in whole and "op1199 " in whole
