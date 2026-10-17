@@ -1,6 +1,8 @@
 """decompdecomp in WSL (Windows) and Docker (macOS): paths the user gives on their own computer, and what the app can
 and can't do from inside (open the browser, show a folder, how the user's agents reach it)."""
 
+import sys
+
 import pytest
 
 from decompnet import hostenv, toolchains
@@ -17,6 +19,7 @@ def runtime(monkeypatch):
     hostenv.runtime.cache_clear()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX paths and #!/bin/sh stubs: run this one in WSL or Linux")
 def test_windows_paths_reach_the_game_from_wsl(runtime, monkeypatch):
     runtime("wsl")
     monkeypatch.setattr(hostenv.subprocess, "run", _no_wslpath)
@@ -36,6 +39,7 @@ def test_wsl_paths_shown_to_windows(runtime, monkeypatch):
     assert bridge[0] == "wsl.exe" and bridge[-2:] == ["/usr/local/bin/decomp", "mcp"] and "decomp-wtf" in bridge
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX paths and #!/bin/sh stubs: run this one in WSL or Linux")
 def test_docker_home_is_the_users_home(runtime):
     runtime("docker", DECOMP_HOST_HOME="/Users/sam", DECOMP_HOST_OS="macos")
     assert str(hostenv.local_path("~/Downloads/game.iso")) == "/Users/sam/Downloads/game.iso"
@@ -46,6 +50,7 @@ def test_docker_home_is_the_users_home(runtime):
     assert hostenv.host_os() == "macos"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX paths and #!/bin/sh stubs: run this one in WSL or Linux")
 def test_native_changes_nothing(runtime):
     runtime("native")
     assert hostenv.host_bridge() is None

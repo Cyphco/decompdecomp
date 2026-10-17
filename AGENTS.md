@@ -27,6 +27,19 @@ uv run pytest tests/test_forks.py -q   # one file
 uv run ruff check src tests projects   # the linter (CI runs it and the tests)
 ```
 
+## Working from Windows
+
+The app runs in WSL 2 (the `decomp-wtf` distribution), so on a Windows host:
+- Clone to a short path (`C:\Users\you\dd-fork`): git fails with "$GIT_DIR too big" in a deep folder such as an app's scratch space.
+- `uv run pytest` works on the Windows side but a few tests need POSIX (paths, `#!/bin/sh` stubs, a Linux `gcc` for
+  `projects/demo`): they skip there. Run the whole suite in WSL for those: `wsl -d decomp-wtf`, then `uv run pytest`
+  in the checkout under `/mnt/c/...` with `UV_PROJECT_ENVIRONMENT` in the Linux home (not on `/mnt/c`).
+- Windows keeps data in `%LOCALAPPDATA%\decompnet`, not `XDG_DATA_HOME`: a test that touches install state sets both
+  (see `tests/test_updates.py`), or it writes to the real one.
+- To install a build into the running app, install the checkout's archive into the WSL distribution
+  (`uv tool install --force "decompnet @ https://github.com/<owner>/decompdecomp/archive/<sha>.tar.gz"`, then
+  `decomp install-info --channel branch --branch main --commit <sha> --repo <owner>/decompdecomp`), and restart it.
+
 ## Never disturb the user's own decompdecomp
 
 The user usually has decompdecomp running (installed with uv, port 6464, projects in `~/Decomp`) with agents working

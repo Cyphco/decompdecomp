@@ -570,6 +570,7 @@ def parse_line(kind: str, line: str, state: dict | None = None) -> list[tuple[st
 
 LOG_MAX = 4_000_000  # bytes a helper's log grows to before it rolls over
 LOG_LINE = 20000  # characters kept of one line (a tool's whole output can be one)
+LOG_KEEP_DAYS = 7  # logs not written to for this long are deleted when the app starts
 LOG_STRING = 1500  # characters kept of one string inside an agent's JSON line, when the line is too long
 
 
@@ -674,6 +675,7 @@ class Manager:
         self.persist = lambda running: None  # set by the server: remember helpers to resume after a restart
         self.log_dir = home / "agent-logs"
         self.pauses: dict[str, tuple[float, str]] = {}  # provider -> (when it may be asked again, what it said)
+        self.prune_logs()
 
     # -- control
 
@@ -776,6 +778,30 @@ class Manager:
         since = since or {}
         return [s.snapshot(int(since.get(s.id, 0))) for s in self.sessions.values()]
 
+    def prune_logs(self, days: float = LOG_KEEP_DAYS) -> int:
+        """Delete helper logs (and their rolled-over halves) nobody wrote to for `days`: a log can hold game code and
+        grows with every night's run. Returns how many files went."""
+        gone = 0
+        for p in [*self.log_dir.glob("*.log"), *self.log_dir.glob("*.log.1")] if self.log_dir.is_dir() else []:
+            try:
+                if time.time() - p.stat().st_mtime > days * 86400:
+                    p.unlink()
+                    gone += 1
+            except OSError:
+                pass
+        return gone
+
+    def log_file(self, sid: str) -> Path:
+        """The log file for an agent name, or a running session's id."""
+        if sid in self.sessions:
+            sid = self.sessions[sid].agent_name
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", sid or ""):
+            raise ValueError("no such log")
+        p = self.log_dir / f"{sid}.log"
+        if not p.is_file():
+            raise ValueError(f"no log for {sid}: it has not run yet, or its log was deleted")
+        return p
+
     def logs(self) -> list[dict]:
         """The log files on disk, newest first (they outlive the sessions: after a restart, or once one is removed)."""
         out = []
@@ -789,13 +815,8 @@ class Manager:
     def read_log(self, sid: str, tail: int = 200_000) -> dict:
         """The end of one helper's log (`tail` bytes, from a line start). `sid`: its agent name, as the Activity feed
         shows it, or a running session's id."""
-        if sid in self.sessions:
-            sid = self.sessions[sid].agent_name
-        if not re.fullmatch(r"[A-Za-z0-9_.-]+", sid or ""):
-            raise ValueError("no such log")
-        p = self.log_dir / f"{sid}.log"
-        if not p.is_file():
-            raise ValueError(f"no log for {sid}: it has not run yet, or its log was deleted")
+        p = self.log_file(sid)
+        sid = p.stem
         size = p.stat().st_size
         with p.open("rb") as f:
             f.seek(max(0, size - tail))

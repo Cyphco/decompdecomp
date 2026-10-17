@@ -144,6 +144,10 @@ def register(app: App) -> None:
         try:
             if not sid:
                 return JSONResponse({"logs": manager.logs()})
+            if request.query_params.get("download"):  # the whole file, for a bug report
+                path = manager.log_file(sid)
+                return Response(path.read_bytes(), media_type="text/plain; charset=utf-8",
+                                headers={"Content-Disposition": f'attachment; filename="{path.name}"'})
             return JSONResponse(manager.read_log(sid, int(request.query_params.get("tail") or 200_000)))
         except (ValueError, OSError) as e:
             return fail(e)

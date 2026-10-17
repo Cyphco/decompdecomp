@@ -125,3 +125,19 @@ def test_a_helper_reports_its_waiting_and_progress(tmp_path):
     assert (snap["wait_until"], snap["wait_reason"], snap["shell_calls"], snap["last_progress"]) == (123.0, "limit", 4, 99.0)
     s.state = "working"
     assert s.snapshot()["wait_until"] == 0  # not waiting any more
+
+
+def test_old_logs_are_deleted_and_recent_ones_stay(tmp_path):
+    import os
+    import time
+
+    m = _bare(tmp_path)
+    m.log_dir.mkdir()
+    old, new, half = (m.log_dir / n for n in ("old.log", "new.log", "old.log.1"))
+    for p in (old, new, half):
+        p.write_text("x")
+    week_ago = time.time() - 8 * 86400
+    os.utime(old, (week_ago, week_ago))
+    os.utime(half, (week_ago, week_ago))
+    assert m.prune_logs() == 2 and new.exists() and not old.exists() and not half.exists()
+    assert m.log_file("new").name == "new.log"

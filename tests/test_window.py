@@ -3,7 +3,10 @@ process of its own and the app knows when it's closed."""
 
 import stat
 import subprocess as sp
+import sys
 import time
+
+import pytest
 
 from decompnet.app import window
 
@@ -22,6 +25,7 @@ def test_the_browser_is_the_users_chromium_family_one(monkeypatch):
     assert window.browser() is None
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX paths and #!/bin/sh stubs: run this one in WSL or Linux")
 def test_one_window_and_closing_it_tells_the_app(tmp_path, monkeypatch):
     fake = tmp_path / "browser"
     fake.write_text("#!/bin/sh\nsleep 0.4\n")
@@ -44,6 +48,7 @@ def test_without_an_app_browser_it_is_a_tab(monkeypatch, tmp_path):
     assert not window.Window(str(tmp_path), lambda: None).open("http://127.0.0.1:6464/")
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX paths and #!/bin/sh stubs: run this one in WSL or Linux")
 def test_quitting_closes_the_window(tmp_path, monkeypatch):
     fake = tmp_path / "browser"
     fake.write_text("#!/bin/sh\nsleep 30\n")

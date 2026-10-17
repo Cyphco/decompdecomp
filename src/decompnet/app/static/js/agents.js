@@ -83,6 +83,7 @@ async function openAgentLog(id) {
   dialog(`Log: ${id}`, `<p class="muted small" id="logMeta">Loading…</p>
     <div class="row"><button class="ghost small-btn" id="logRefresh" type="button">Refresh</button>
       <button class="ghost small-btn" id="logCopy" type="button">Copy</button>
+      <a class="ghost small-btn" id="logDownload" href="/api/agents/log?id=${encodeURIComponent(id)}&download=1" download>Download</a>
       <label class="check small"><input type="checkbox" id="logLive" checked><span>Live</span></label>
       <select id="logMode" aria-label="What to show"><option value="readable">Readable</option><option value="errors">Errors and exits</option><option value="raw">Everything, raw</option></select></div>
     <pre class="agent-log" id="logText"></pre>`);
