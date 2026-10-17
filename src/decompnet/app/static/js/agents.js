@@ -77,6 +77,7 @@ async function openAgentLog(id) {
   dialog(`Log: ${id}`, `<p class="muted small" id="logMeta">Loading…</p>
     <div class="row"><button class="ghost small-btn" id="logRefresh" type="button">Refresh</button>
       <button class="ghost small-btn" id="logCopy" type="button">Copy</button>
+      <label class="check small"><input type="checkbox" id="logLive" checked><span>Live</span></label>
       <select id="logMode" aria-label="What to show"><option value="readable">Readable</option><option value="errors">Errors and exits</option><option value="raw">Everything, raw</option></select></div>
     <pre class="agent-log" id="logText"></pre>`);
   let text = "";
@@ -102,8 +103,9 @@ async function openAgentLog(id) {
     if (mode === "errors") lines = lines.filter((l) => /^\S+ (error|exit|start)\s/.test(l) || (/^\S+ err\s/.test(l) && !quiet.test(l)) || /level=ERROR|rate limit|\b(429|503)\b|exited|failed/i.test(l));
     else if (mode === "readable") lines = lines.filter((l) => !quiet.test(l) && !/^\S+ prompt\s/.test(l)).map(readable).filter((l) => l !== null);
     const pre = $("logText");
-    pre.textContent = lines.join("\n");
-    pre.scrollTop = pre.scrollHeight;
+    const stick = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 30;  // following the end, unless scrolled up
+    pre.textContent = lines.length ? lines.join("\n") : `Nothing in this view yet (${text.split("\n").filter(Boolean).length} lines in the log: pick "Everything, raw").`;
+    if (stick) pre.scrollTop = pre.scrollHeight;
   };
   const load = async () => {
     try {
@@ -113,6 +115,7 @@ async function openAgentLog(id) {
       show();
     } catch (e) { $("logMeta").textContent = e.message; }
   };
+  const timer = setInterval(() => { if ($("dialog").hidden || !$("logLive")) clearInterval(timer); else if ($("logLive").checked) load(); }, 3000);
   $("logRefresh").onclick = load;
   $("logMode").onchange = show;
   $("logCopy").onclick = () => navigator.clipboard.writeText(text).then(() => toast("Log copied."));

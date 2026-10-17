@@ -81,3 +81,15 @@ def test_a_flag_is_only_passed_to_an_opencode_that_knows_it(monkeypatch):
     monkeypatch.setattr(sp, "run", lambda *a, **k: sp.CompletedProcess(a, 0, stdout="  --format", stderr=""))
     assert not agents._has_flag("opencode", "--thinking")
     agents._flags.clear()
+
+
+def test_a_long_json_line_stays_json(tmp_path):
+    import json
+
+    big = {"type": "tool_use", "part": {"tool": "decomp_get_context", "state": {"output": "x" * 50000}}}
+    s = session(tmp_path)
+    s.raw("out", json.dumps(big))
+    line = s.log_path.read_text(encoding="utf-8").splitlines()[0]
+    obj = json.loads(line.split(None, 2)[2])  # still parses: the viewer reads tool names and results from it
+    assert obj["part"]["tool"] == "decomp_get_context" and "more characters" in obj["part"]["state"]["output"]
+    assert len(line) < agents.LOG_LINE + 20

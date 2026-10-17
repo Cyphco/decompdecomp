@@ -560,6 +560,30 @@ def parse_line(kind: str, line: str, state: dict | None = None) -> list[tuple[st
 
 LOG_MAX = 4_000_000  # bytes a helper's log grows to before it rolls over
 LOG_LINE = 20000  # characters kept of one line (a tool's whole output can be one)
+LOG_STRING = 1500  # characters kept of one string inside an agent's JSON line, when the line is too long
+
+
+def _shrink(value, limit: int = LOG_STRING):
+    """A JSON value with its long strings cut: a tool's whole output (an 800-line header) is one string in one line, and
+    cutting the line itself leaves JSON nothing can read."""
+    if isinstance(value, str):
+        return value if len(value) <= limit else f"{value[:limit]}… [{len(value) - limit} more characters]"
+    if isinstance(value, list):
+        return [_shrink(v, limit) for v in value]
+    if isinstance(value, dict):
+        return {k: _shrink(v, limit) for k, v in value.items()}
+    return value
+
+
+def _fit_line(tag: str, line: str) -> str:
+    if len(line) <= LOG_LINE:
+        return line
+    if tag == "out" and line.lstrip().startswith("{"):
+        try:
+            return json.dumps(_shrink(json.loads(line)), ensure_ascii=False)[:LOG_LINE]
+        except ValueError:
+            pass
+    return line[:LOG_LINE]
 
 
 @dataclass
@@ -604,7 +628,7 @@ class Session:
                     self.log_path.replace(self.log_path.with_name(self.log_path.name + ".1"))
                 with self.log_path.open("a", encoding="utf-8", errors="replace", newline="\n") as f:
                     for line in (text.splitlines() or [""]):
-                        f.write(f"{stamp} {tag:<6} {line[:LOG_LINE]}\n")
+                        f.write(f"{stamp} {tag:<6} {_fit_line(tag, line)}\n")
             except OSError:  # a log that can't be written must never stop the helper
                 pass
 
