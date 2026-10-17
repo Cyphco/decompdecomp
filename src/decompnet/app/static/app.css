@@ -803,3 +803,4 @@ input[type="file"]::file-selector-button:hover { background: var(--bg-alt); bord
 /* agent logs */
 .head-actions { display: flex; gap: 8px; }
 .agent-log { margin-top: 10px; max-height: 60vh; overflow: auto; padding: 10px 12px; border-radius: var(--r); border: 1px solid var(--line-soft); background: var(--raise); font: 12px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.session .state.warn, .session .facts-line.warn { color: var(--work); }

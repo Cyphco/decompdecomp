@@ -10,7 +10,7 @@ import re
 import struct
 
 from ... import classes, seeds, similarity
-from ...network import NetworkError
+from ...network import WALL_ABANDONS, NetworkError
 from ...rom import match
 from .common import _ADDRESS
 
@@ -263,8 +263,11 @@ class BriefMixin:
         if (fork := self.fork_slug(project)):
             return self.forks.list_functions(fork, status, limit)
         proj = self._project(project)
-        where = "" if status == "all" else " AND f.status=?"
-        args = [proj["id"]] + ([] if status == "all" else [status])
+        if status == "walls":  # released again and again without a match: automatic claims leave them for last
+            where, args = " AND f.status='open' AND f.abandons>=?", [proj["id"], WALL_ABANDONS]
+        else:
+            where = "" if status == "all" else " AND f.status=?"
+            args = [proj["id"]] + ([] if status == "all" else [status])
         rows = self.store.all(
             f"SELECT f.name, f.vram, f.n_insns, f.status, f.best_score, a.name AS claimed_by FROM functions f "
             f"LEFT JOIN claims c ON c.function_id=f.id LEFT JOIN agents a ON a.id=c.agent_id "

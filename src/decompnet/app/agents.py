@@ -171,6 +171,16 @@ LIMIT_WAIT = 15 * 60
 log = logging.getLogger("decompdecomp")
 
 
+def _provider_words(rx: re.Pattern, said: str, width: int = 160) -> str:
+    """The provider's own sentence around what matched (opencode: "Usage limit reached for 5 hour. Your limit will reset
+    at 2026-10-18 02:22:34"), for the helper's state in the app."""
+    m = rx.search(said)
+    if not m:
+        return ""
+    start = max(0, m.start() - 20)
+    return " ".join(said[start:m.end() + width].split())[:width + 40]
+
+
 def no_credit(said: str) -> str | None:
     """The helper's error when its model's provider says the account is out of credit, else None."""
     if not (m := _NO_CREDIT.search(said)):
@@ -607,6 +617,11 @@ class Session:
     signed_out: bool = False  # the agent CLI isn't signed in: trying again won't help
     throttled: bool = False  # the last run ended on the provider's limit of requests at once: not a failure
     limited: bool = False  # the last run ended on the plan's usage limit: wait for it to reset (LIMIT_WAIT)
+    wait_until: float = 0.0  # when a helper waiting out a provider's limit tries again (the app shows it)
+    wait_reason: str = ""  # what the provider said
+    limit_streak: int = 0  # limit hits in a row: each wait is longer
+    last_progress: float = 0.0  # the last compile, claim or note it made
+    shell_calls: int = 0  # shell commands it ran (local compiler experiments: they never reach the judge's count)
     log_path: Path | None = None  # everything this helper said and the agent printed, for debugging (see raw)
     secrets: list = field(default_factory=list)  # tokens and keys the log must never hold
     _loglock: threading.Lock = field(default_factory=threading.Lock)
@@ -643,6 +658,8 @@ class Session:
         return {"id": self.id, "kind": self.kind, "label": self.label, "slug": self.slug, "agent": self.agent_name,
                 "state": self.state, "runs": self.runs, "error": self.error, "started_at": self.started_at,
                 "model": self.options.get("model") or "", "usd": round(self.usd, 4), "tokens": self.tokens,
+                "wait_until": self.wait_until if self.state == "waiting" else 0, "wait_reason": self.wait_reason,
+                "last_progress": self.last_progress, "shell_calls": self.shell_calls,
                 "feed": [f for f in self.feed if f["seq"] > since]}
 
 
@@ -656,6 +673,7 @@ class Manager:
         self.on_stop = lambda: None  # set by the server: close tunnels when the app quits
         self.persist = lambda running: None  # set by the server: remember helpers to resume after a restart
         self.log_dir = home / "agent-logs"
+        self.pauses: dict[str, tuple[float, str]] = {}  # provider -> (when it may be asked again, what it said)
 
     # -- control
 
@@ -853,6 +871,14 @@ class Manager:
                     pass
                 s.stop.wait(10)
                 continue
+            until, why = self.pauses.get(self.provider(s), (0.0, ""))
+            if until > time.time():  # another helper found the provider's limit: don't hit it again meanwhile
+                if s.state != "waiting" or s.wait_until != until:
+                    s.push("info", f"waiting until {time.strftime('%H:%M', time.localtime(until))}: {why}")
+                s.state, s.wait_until, s.wait_reason = "waiting", until, why
+                s.stop.wait(min(30, max(1, until - time.time())))
+                continue
+            s.wait_until, s.wait_reason = 0.0, ""
             s.state = "working"
             s.runs += 1
             t0 = time.time()
@@ -876,17 +902,22 @@ class Manager:
                 break
             if s.limited:  # the plan's allowance is used up for now: it resets, so wait as long as it takes
                 s.limited, s.state = False, "waiting"
-                s.push("info", f"{KINDS[s.kind].name}'s usage limit is reached: trying again in {LIMIT_WAIT // 60} "
-                               "minutes (it resets by itself; this helper carries on then)")
-                s.stop.wait(LIMIT_WAIT)
+                wait = min(LIMIT_WAIT * 2 ** min(s.limit_streak, 4), 4 * 3600)  # 15 min, 30, 1 h, 2 h, 4 h
+                s.limit_streak += 1
+                said = s.wait_reason or f"{KINDS[s.kind].name}'s usage limit is reached"
+                self.pause_provider(s, wait, said)
+                s.push("info", f"{said}: every helper on this provider waits {wait // 60} minutes, then tries again "
+                               "(it resets by itself)")
                 continue
             if s.throttled and throttles < 10:  # the provider's limit, not the agent's failure: wait it out
                 s.throttled, throttles = False, throttles + 1
-                s.state = "waiting"
-                s.push("info", "the model's provider says too many requests at once: trying again in a minute "
-                               "(fewer agents at once on this account would wait less)")
-                s.stop.wait(60)
+                wait = min(60 * 2 ** min(throttles - 1, 4), 900)  # a minute, then longer, up to 15
+                said = s.wait_reason or "the model's provider says too many requests at once"
+                self.pause_provider(s, wait, said)
+                s.push("info", f"{said}: every helper on this provider waits {max(1, wait // 60)} minute(s), then "
+                               "tries again (fewer agents at once on this account would wait less)")
                 continue
+            s.limit_streak = 0 if ok else s.limit_streak
             throttles = 0 if ok else throttles
             failures = 0 if ok else failures + 1
             if failures >= 3:
@@ -911,6 +942,24 @@ class Manager:
                 pass
         with self.net.store.tx() as db:  # release any claim the agent still holds so others can take it
             db.execute("DELETE FROM claims WHERE agent_id=?", (agent.id,))
+
+    @staticmethod
+    def provider(s: Session) -> str:
+        """Who answers for this helper's model: opencode's "zai-coding-plan" of "zai-coding-plan/glm-5.3", an API
+        helper's endpoint, else the agent itself. Helpers sharing one are rate-limited together."""
+        model = s.options.get("model") or ""
+        if s.kind == "opencode" and "/" in model:
+            return f"opencode:{model.split('/', 1)[0]}"
+        if s.kind == "api":
+            return f"api:{s.options.get('endpoint') or s.options.get('base_url') or ''}"
+        return s.kind
+
+    def pause_provider(self, s: Session, seconds: float, why: str) -> None:
+        """One helper hit the provider's limit: every helper on that provider waits, not just it (eight helpers
+        retrying a minute apart kept an overloaded provider overloaded)."""
+        until = time.time() + seconds
+        if until > self.pauses.get(self.provider(s), (0, ""))[0]:
+            self.pauses[self.provider(s)] = (until, why)
 
     def prompt(self, s: Session) -> str:
         text = self._prompt(s)
@@ -1064,6 +1113,11 @@ class Manager:
                     self._account(s, json.loads(text))
                     continue
                 saw_tool |= kind == "tool"
+                if kind == "tool":
+                    name = text.split("(", 1)[0].lower()
+                    s.shell_calls += name.startswith(("bash", "shell"))
+                    if any(k in name for k in ("compile_and_diff", "claim_function", "add_note", "release_function")):
+                        s.last_progress = time.time()
                 said.append(text)
                 if kind == "error":
                     last_error = text
@@ -1077,12 +1131,15 @@ class Manager:
         s.raw("exit", f"code {code}, saw a tool: {saw_tool}")
         if refused and not s.stop.is_set():
             raise Fatal(refused)  # every retry would be refused the same way
-        if not s.stop.is_set() and _LIMIT.search(" ".join([*said, *errors])):
+        heard = " ".join([*said, *errors])
+        if not s.stop.is_set() and _LIMIT.search(heard):
             s.limited = True  # whatever the exit code: Claude Code says so in an ordinary result
+            s.wait_reason = _provider_words(_LIMIT, heard)
         elif code != 0 and not s.stop.is_set() and (why := no_credit(" ".join([*said, *errors]))):
             raise Fatal(why)  # every agent on this account fails the same way until it's topped up
-        if code != 0 and not s.stop.is_set() and _THROTTLED.search(" ".join([*said, *errors])):
+        if code != 0 and not s.stop.is_set() and _THROTTLED.search(heard):
             s.throttled = True
+            s.wait_reason = s.wait_reason if s.limited else _provider_words(_THROTTLED, heard)
         if code != 0 and not s.stop.is_set() and _SIGNED_OUT.search(" ".join([*said, *errors])):
             s.signed_out = True
             s.error = f"{KINDS[s.kind].name} isn't signed in on this computer. {signin(KINDS[s.kind])}"

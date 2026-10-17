@@ -275,17 +275,20 @@ $("fnNext").onclick = () => stepFn(1);
 
 /* ------------------------------------------------------------------ function list */
 const L = { q: "", filter: "all", sort: "i", dir: 1, limit: 200, rows: [] };
-const FILTERS = [["all", "All"], ["open", "To do"], ["working", "Working"], ["tried", "Tried"], ["matched", "Matched"]];
+const FILTERS = [["all", "All"], ["open", "To do"], ["working", "Working"], ["tried", "Tried"], ["wall", "Walls"], ["matched", "Matched"]];
+// released this many times without a match: automatic claims leave it for last (WALL_ABANDONS in network.py)
+const WALL = 6;
+const isWall = (f) => f.status !== "matched" && f.status !== "asm" && (f.abandons || 0) >= WALL;
 const fnState = (f) => (f.status === "matched" ? "matched" : f.status === "asm" ? "asm" : f.status === "working" ? "working" : f.best != null ? "tried" : "open");
 const STATE_RANK = { working: 0, tried: 1, open: 2, matched: 3, asm: 4 };
 
 function renderList() {
   if (!S.map.length || S.tab !== "functions") return;
-  const counts = { all: S.map.length, open: 0, working: 0, tried: 0, matched: 0, asm: 0 };
-  for (const f of S.map) counts[fnState(f)]++;
+  const counts = { all: S.map.length, open: 0, working: 0, tried: 0, matched: 0, asm: 0, wall: 0 };
+  for (const f of S.map) { counts[fnState(f)]++; if (isWall(f)) counts.wall++; }
   $("fnFilter").innerHTML = FILTERS.map(([k, label]) => `<button type="button" role="radio" aria-checked="${L.filter === k}" class="${L.filter === k ? "on" : ""}" data-filter="${k}">${label}<span>${counts[k].toLocaleString()}</span></button>`).join("");
   const q = L.q.trim().toLowerCase();
-  let rows = S.map.filter((f) => (L.filter === "all" || fnState(f) === L.filter)
+  let rows = S.map.filter((f) => (L.filter === "all" || (L.filter === "wall" ? isWall(f) : fnState(f) === L.filter))
     && (!q || f.name.toLowerCase().includes(q) || hex8(f.vram).toLowerCase().includes(q) || (f.unit || "").toLowerCase().includes(q)));
   const key = {
     i: (f) => f.i, name: (f) => f.name.toLowerCase(), insns: (f) => f.insns, attempts: (f) => f.attempts || 0,

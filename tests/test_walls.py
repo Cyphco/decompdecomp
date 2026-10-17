@@ -40,3 +40,15 @@ def test_long_notes_are_clipped():
     assert _clip("short") == "short"
     clipped = _clip("x" * (NOTE_CHARS + 500))
     assert clipped.startswith("x" * NOTE_CHARS) and clipped.endswith("[500 more characters]")
+
+
+def test_the_walls_can_be_listed(tmp_path):
+    from decompnet.app.engine import RomNetwork
+
+    n = RomNetwork(tmp_path / "t.db", tmp_path)
+    with n.store.tx() as db:
+        db.execute("INSERT INTO projects(id,slug,name,arch,root,config) VALUES(1,'p','P','arm','.',?)", (json.dumps({}),))
+        for name, abandons in (("wall", WALL_ABANDONS), ("fresh", 0)):
+            db.execute("INSERT INTO functions(project_id,name,vram,n_insns,abandons) VALUES(1,?,4096,5,?)", (name, abandons))
+    out = n.list_functions("p", "walls")
+    assert "wall" in out and "fresh" not in out

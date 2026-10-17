@@ -93,3 +93,35 @@ def test_a_long_json_line_stays_json(tmp_path):
     obj = json.loads(line.split(None, 2)[2])  # still parses: the viewer reads tool names and results from it
     assert obj["part"]["tool"] == "decomp_get_context" and "more characters" in obj["part"]["state"]["output"]
     assert len(line) < agents.LOG_LINE + 20
+
+
+def test_helpers_on_one_provider_wait_together():
+    m = agents.Manager.__new__(agents.Manager)
+    m.pauses = {}
+    a = agents.Session("opencode-1", "opencode", "opencode #1", "p", "a", {"model": "zai-coding-plan/glm-5.3"})
+    b = agents.Session("opencode-2", "opencode", "opencode #2", "p", "b", {"model": "zai-coding-plan/glm-5.2"})
+    c = agents.Session("opencode-3", "opencode", "opencode #3", "p", "c", {"model": "opencode/deepseek-v4.1-flash-free"})
+    assert m.provider(a) == m.provider(b) != m.provider(c)
+    m.pause_provider(a, 600, "Usage limit reached")
+    until, why = m.pauses[m.provider(b)]  # b never hit it: it waits because a did
+    assert until > __import__("time").time() + 500 and why == "Usage limit reached"
+    assert m.provider(c) not in m.pauses
+    m.pause_provider(a, 10, "shorter")  # a shorter pause never shortens a longer one
+    assert m.pauses[m.provider(a)][1] == "Usage limit reached"
+
+
+def test_the_providers_own_words_are_kept():
+    said = ('Streaming failed. "message":"Usage limit reached for 5 hour. Your limit will reset at 2026-10-18 02:22:34",'
+            '"statusCode":429')
+    words = agents._provider_words(agents._LIMIT, said)
+    assert "Usage limit reached for 5 hour" in words and "reset at 2026-10-18 02:22:34" in words
+    assert agents._provider_words(agents._LIMIT, "all fine") == ""
+
+
+def test_a_helper_reports_its_waiting_and_progress(tmp_path):
+    s = session(tmp_path)
+    s.state, s.wait_until, s.wait_reason, s.shell_calls, s.last_progress = "waiting", 123.0, "limit", 4, 99.0
+    snap = s.snapshot()
+    assert (snap["wait_until"], snap["wait_reason"], snap["shell_calls"], snap["last_progress"]) == (123.0, "limit", 4, 99.0)
+    s.state = "working"
+    assert s.snapshot()["wait_until"] == 0  # not waiting any more

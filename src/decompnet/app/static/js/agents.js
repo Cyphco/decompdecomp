@@ -48,11 +48,17 @@ function renderSessions(sessions) {
     const b = board.get(s.agent);
     const facts = [s.model ? esc(s.model) : "default model", s.runs ? `session ${s.runs}` : "", b && b.matched ? `<b class="ok">${b.matched} matched</b>` : "", b ? plural(b.compiles, "compile") : "",
       s.usd ? money(s.usd) : s.tokens ? `${(s.tokens / 1000).toFixed(0)}k tokens` : "", s.started_at ? `since ${clock(s.started_at).slice(0, 5)}` : ""].filter(Boolean);
+    const hm = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+    const idle = live && s.state === "working" && Date.now() / 1000 - (s.last_progress || s.started_at || 0) > 20 * 60;
+    const health = [s.shell_calls ? plural(s.shell_calls, "shell run") : "",
+      live && s.state !== "waiting" ? (s.last_progress ? `last progress ${hm(s.last_progress)}` : "no compile or claim yet") : ""].filter(Boolean);
     return `<div class="session"><div class="session-top"><span class="dot ${dot}"></span><b>${esc(s.label)}</b>
         <span class="state ${s.state === "error" ? "err" : ""}">${esc(STATE_TEXT[s.state] || s.state)}</span>
         <button class="ghost" data-log="${esc(s.agent)}" type="button">Log</button>
         <button class="ghost" data-stop="${esc(s.id)}" data-remove="${live ? "" : "1"}" type="button">${live ? "Stop" : "Remove"}</button></div>
       <span class="facts-line">${facts.join(" · ")}</span>
+      ${health.length ? `<span class="facts-line${idle ? " warn" : ""}">${idle ? "⚠ no progress for 20+ min · " : ""}${health.join(" · ")}</span>` : ""}
+      ${s.state === "waiting" && s.wait_until ? `<span class="state warn">waiting until ${hm(s.wait_until)}${s.wait_reason ? `: ${esc(s.wait_reason)}` : ""}</span>` : ""}
       ${s.state === "error" ? `<span class="state err">${esc(s.error)}</span>` : ""}
       ${claim ? `<span class="last">on ${fnLink(claim.name)}</span>` : ""}</div>`;
   }).join("");
