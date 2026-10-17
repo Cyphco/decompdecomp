@@ -11,7 +11,7 @@ from pathlib import Path
 
 from ... import scoring
 from ...elfobj import FunctionObj
-from ...network import Agent, Network, NetworkError
+from ...network import RELEASE_COOLDOWN, Agent, Network, NetworkError
 from ...rom import match, split
 from ...rom.symbols import SymbolTable
 from .common import _AUTO_TOKEN, BATCH_INSNS
@@ -281,7 +281,13 @@ class JudgeMixin:
             for name in self.cfg(proj).get("priority", []):
                 row = self.store.one("SELECT f.id, f.status FROM functions f WHERE f.project_id=? AND f.name=?", proj["id"], name)
                 held = self.store.one("SELECT 1 FROM claims WHERE agent_id=?", agent.id)
-                if row and row["status"] == "open" and not held and not self.store.one(
+                # not one this agent already gave up, nor one anybody gave up a moment ago: the queue handed the same
+                # function to the same helper 18 times in a minute (it released it unattempted each time), as the
+                # first free function again and again
+                gave_up = self.store.one(
+                    "SELECT 1 FROM events WHERE project_id=? AND kind='release' AND detail=? AND (agent_id=? OR created_at>?)",
+                    proj["id"], name, agent.id, time.time() - RELEASE_COOLDOWN)
+                if row and row["status"] == "open" and not held and not gave_up and not self.store.one(
                         "SELECT 1 FROM claims WHERE function_id=?", row["id"]):
                     function = name
                     break

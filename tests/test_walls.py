@@ -158,3 +158,23 @@ def test_a_long_functions_assembly_comes_in_parts(tmp_path, monkeypatch):
     assert "op0 " not in part
     whole = n.get_function("small", "p", agent)  # short functions are shown whole, as before
     assert "### Target assembly\n" in whole and "op1199 " in whole
+
+
+def test_the_queue_does_not_hand_back_what_a_helper_just_released(tmp_path):
+    from decompnet.app.engine import RomNetwork
+
+    n = RomNetwork(tmp_path / "t.db", tmp_path)
+    with n.store.tx() as db:
+        db.execute("INSERT INTO projects(id,slug,name,arch,root,config) VALUES(1,'p','P','arm','.',?)",
+                   (json.dumps({"priority": ["big", "next"]}),))
+        for name, vram in (("big", 4096), ("next", 8192), ("other", 12288)):
+            db.execute("INSERT INTO functions(project_id,name,vram,n_insns) VALUES(1,?,?,5)", (name, vram))
+    a = n.authenticate(n.register_agent("a", "a"))
+    b = n.authenticate(n.register_agent("b", "b"))
+    assert n.claim_row(a, "p")["name"] == "big"  # the queue's first
+    n.release(a, "big", "too large", "p")
+    assert n.claim_row(a, "p")["name"] == "next"  # not "big" again: a gave it up
+    n.release(a, "next", "", "p")
+    assert n.claim_row(a, "p")["name"] == "other"  # the queue is used up for a
+    n.release(a, "other", "", "p")
+    assert n.claim_row(a, "p") is None  # everything has been given up by a: nothing is handed back
