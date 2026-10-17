@@ -141,3 +141,34 @@ def test_old_logs_are_deleted_and_recent_ones_stay(tmp_path):
     os.utime(half, (week_ago, week_ago))
     assert m.prune_logs() == 2 and new.exists() and not old.exists() and not half.exists()
     assert m.log_file("new").name == "new.log"
+
+
+def test_an_api_request_is_sent_again_after_a_timeout(tmp_path, monkeypatch):
+    import httpx
+
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        if len(calls) < 3:
+            raise httpx.ReadTimeout("slow", request=request)
+        return httpx.Response(200, json={"choices": []})
+
+    s = session(tmp_path)
+    monkeypatch.setattr(s.stop, "wait", lambda t=None: False)  # no real waiting between attempts
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        r = agents._post_with_retries(s, client, "http://x/chat/completions", {}, {"model": "m"})
+    assert r.status_code == 200 and len(calls) == 3
+    assert s.log_path.read_text(encoding="utf-8").count("ReadTimeout waiting for the model") == 2
+
+
+def test_an_api_request_gives_up_after_the_last_attempt(tmp_path, monkeypatch):
+    import httpx
+
+    def handler(request):
+        raise httpx.ConnectError("down", request=request)
+
+    s = session(tmp_path)
+    monkeypatch.setattr(s.stop, "wait", lambda t=None: False)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client, pytest.raises(httpx.ConnectError):
+        agents._post_with_retries(s, client, "http://x/chat/completions", {}, {})

@@ -1195,7 +1195,10 @@ class Manager:
         messages = [{"role": "system", "content": tools.INSTRUCTIONS},
                     {"role": "user", "content": self.prompt(s)}]
         used_tool = False
-        with httpx.Client(timeout=httpx.Timeout(300, connect=15)) as client:
+        # a reasoning model can think for minutes before its first byte: a read timeout used to end the whole session,
+        # and with it the conversation (a night of Nemotron sessions each ended on "ReadTimeout" and started over)
+        read_timeout = float(s.options.get("request_timeout") or API_READ_TIMEOUT)
+        with httpx.Client(timeout=httpx.Timeout(read_timeout, connect=15)) as client:
             window = context_window(client, base, s.options)
             s.push("info", f"session {s.runs}: {model} via {base} ({window // 1000}K tokens of context)")
             budget = int(window * 0.7) - _tokens(schema)  # room for the reply and the tools' definitions
@@ -1204,8 +1207,8 @@ class Manager:
                     return True
                 for _attempt in range(4):
                     fit(messages, budget)
-                    r = client.post(f"{base}/chat/completions", headers=headers,
-                                    json={"model": model, "messages": messages, "tools": schema, "tool_choice": "auto"})
+                    r = _post_with_retries(s, client, f"{base}/chat/completions", headers,
+                                           {"model": model, "messages": messages, "tools": schema, "tool_choice": "auto"})
                     if r.status_code == 200 or not _too_long(r):
                         break
                     budget = int(budget * 0.6)  # the server counts differently, or knows better: trim more
@@ -1247,6 +1250,22 @@ class Manager:
                 if len(messages) > 80:  # keep the conversation small: summarize by restarting fresh
                     return True
         return used_tool
+
+
+API_READ_TIMEOUT = 600  # seconds an API helper waits for a reply (a reasoning model may think for minutes)
+API_RETRIES = 3  # times a request is sent again after a timeout or a dropped connection, keeping the conversation
+
+
+def _post_with_retries(s: Session, client, url: str, headers: dict, payload: dict):
+    """One request of an API helper's conversation, sent again when the connection times out or drops: the model
+    may only have been slow, and giving up threw the whole conversation away. The last failure is raised."""
+    for attempt in range(1, API_RETRIES + 1):
+        try:
+            return client.post(url, headers=headers, json=payload)
+        except (httpx.TimeoutException, httpx.TransportError) as e:
+            s.push("info", f"{type(e).__name__} waiting for the model (attempt {attempt} of {API_RETRIES})")
+            if attempt == API_RETRIES or s.stop.wait(min(30, 5 * attempt)):
+                raise
 
 
 def _tokens(obj) -> int:
