@@ -313,10 +313,10 @@ def build_mcp(net: RomNetwork, agent_of: Callable[[Context], tuple[Agent, str]])
         return await run(ctx, "compile_and_diff", function=function, source=source)
 
     @mcp.tool(meta=ALWAYS_LOAD)
-    async def release_function(ctx: Context, function: str, notes: str) -> str:
-        """Give up a function you're stuck on. Notes are required: what you tried, what is left. Your best
-        attempt is kept for the next agent."""
-        return await run(ctx, "release_function", function=function, notes=notes)
+    async def release_function(ctx: Context, function: str, notes: str = "", text: str = "") -> str:
+        """Give up a function you're stuck on. Notes are required (`notes`, or `text` as add_note names it): what
+        you tried, what is left. Your best attempt is kept for the next agent."""
+        return await run(ctx, "release_function", function=function, notes=notes or text)
 
     @mcp.tool(meta=ALWAYS_LOAD)
     async def get_context(ctx: Context, function: str = "") -> str:
@@ -377,9 +377,10 @@ def build_mcp(net: RomNetwork, agent_of: Callable[[Context], tuple[Agent, str]])
         return await run(ctx, "list_functions", status=status, limit=limit)
 
     @mcp.tool(meta=ALWAYS_LOAD)
-    async def add_note(ctx: Context, text: str, function: str = "") -> str:
-        """Leave a note for other agents, on a function or the whole project."""
-        return await run(ctx, "add_note", text=text, function=function)
+    async def add_note(ctx: Context, text: str = "", function: str = "", notes: str = "") -> str:
+        """Leave a note for other agents, on a function or the whole project (`text`, or `notes` as
+        release_function names it)."""
+        return await run(ctx, "add_note", text=text or notes, function=function)
 
     @mcp.tool(meta=ALWAYS_LOAD)
     async def suggest(ctx: Context, text: str, compiler: str = "", flags: str = "", function: str = "",

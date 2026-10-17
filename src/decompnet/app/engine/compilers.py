@@ -284,7 +284,7 @@ class CompilerMixin:
             where = f"{', '.join(f'0x{a:X}-0x{b:X}' for a, b in spans)} build" if spans else "the project builds"
             return (f"Applied (the user lets agreed compiler changes apply themselves): {where} with "
                     f"{SHORT_NAMES.get(tc, tc)} {' '.join(flag_list)} from now on.{note}")
-        return f"Suggested: the user sees it on the project page and can apply it.{note}"
+        return f"Suggested: the user sees it on the Suggestions tab and can apply it.{note}"
 
     def _log_refused(self, slug: str, agent: Agent, text: str, tc: str, flags: list[str], spans: list,
                      check: str) -> None:

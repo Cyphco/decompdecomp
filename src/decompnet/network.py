@@ -26,6 +26,10 @@ CLAIM_TTL = 30 * 60
 # A function an agent just released goes to the back of the queue for this long, for every agent: the next one
 # starts on something fresh instead of passing the same function back and forth. Asked for by name, it comes at once.
 RELEASE_COOLDOWN = 15 * 60
+# A function released this many times without a match is a wall (Harvest Moon GBA: the same ten functions were
+# re-claimed by session after session, each rediscovering the same dead end). Automatic claims leave it for last.
+WALL_ABANDONS = 6
+NOTE_CHARS = 1500  # one note's share of a brief: the rest is in the notes' own words, a call away
 MACHINE_AGENTS = ("autopilot", "permuter")  # decompdecomp's own workers: their claims never mean "given up on"
 # Twins first (see app/twins.py): a function whose code the game has more than once (boost: how many more times)
 # and isn't too big or given up on, best value per instruction first; its twins (boost -1) last, as they match for
@@ -60,6 +64,10 @@ class Agent:
 
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _clip(text: str, limit: int = NOTE_CHARS) -> str:
+    return text if len(text) <= limit else text[:limit].rstrip() + f" … [{len(text) - limit} more characters]"
 
 
 def _ago(ts: float | None) -> str:
@@ -278,14 +286,18 @@ class Network:
                 db.execute("INSERT INTO claims VALUES(?,?,?,?)", (fn["id"], agent.id, now, now + self.claim_ttl))
                 self._event(db, fn["project_id"], agent.id, "claim", fn["name"])
             else:
-                fn = db.execute(
-                    f"""SELECT f.* FROM functions f WHERE f.project_id=? AND f.status='open'
-                        AND f.id NOT IN (SELECT function_id FROM claims)
-                        AND f.name NOT IN (SELECT detail FROM events WHERE project_id=? AND agent_id=? AND kind='release')
-                        ORDER BY f.name IN (SELECT detail FROM events WHERE project_id=? AND kind='release'
-                                            AND created_at > ?), {STRATEGIES[strategy]} LIMIT 1""",
-                    (proj["id"], proj["id"], agent.id, proj["id"], now - RELEASE_COOLDOWN),
-                ).fetchone()
+                for walls in ("AND f.abandons < ?", ""):  # walls only when nothing else is left
+                    fn = db.execute(
+                        f"""SELECT f.* FROM functions f WHERE f.project_id=? AND f.status='open' {walls}
+                            AND f.id NOT IN (SELECT function_id FROM claims)
+                            AND f.name NOT IN (SELECT detail FROM events WHERE project_id=? AND agent_id=? AND kind='release')
+                            ORDER BY f.name IN (SELECT detail FROM events WHERE project_id=? AND kind='release'
+                                                AND created_at > ?), {STRATEGIES[strategy]} LIMIT 1""",
+                        (proj["id"], *([WALL_ABANDONS] if walls else []), proj["id"], agent.id, proj["id"],
+                         now - RELEASE_COOLDOWN),
+                    ).fetchone()
+                    if fn is not None:
+                        break
                 if fn is None:
                     return None
                 db.execute("INSERT INTO claims VALUES(?,?,?,?)", (fn["id"], agent.id, now, now + self.claim_ttl))
@@ -322,6 +334,9 @@ class Network:
         if own is not cfg.get("compiler"):  # a range built by another compiler than the rest of the game
             lines.append(f"compiled with {own['toolchain']} {' '.join(own['flags'])}: this address range's compiler, "
                          f"not the project's")
+        if fn["status"] == "open" and fn["abandons"] >= WALL_ABANDONS:
+            lines.append(f"WARNING: released {fn['abandons']} times without a match: very likely a wall. Read the notes "
+                         f"before spending compiles, and release it again quickly unless you have something new.")
         if claim:
             who = "you" if agent and claim["agent_id"] == agent.id else self._agent_name(claim["agent_id"])
             lines.append(f"claimed by {who}, lease expires in {int(claim['expires_at'] - time.time()) // 60} min "
@@ -345,7 +360,7 @@ class Network:
             "WHERE n.function_id=? ORDER BY n.id DESC LIMIT 8", fn["id"])
         if notes:
             lines += ["", "### Notes from previous agents on this function"]
-            lines += [f"- ({n['name']}, {_ago(n['created_at'])}) {n['text']}" for n in notes]
+            lines += [f"- ({n['name']}, {_ago(n['created_at'])}) {_clip(n['text'])}" for n in notes]
         pnotes = self.store.all(
             "SELECT n.text, a.name FROM notes n LEFT JOIN agents a ON a.id=n.agent_id "
             "WHERE n.project_id=? AND n.function_id IS NULL ORDER BY n.id DESC LIMIT 5", proj["id"])

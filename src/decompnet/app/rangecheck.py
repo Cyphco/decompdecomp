@@ -109,7 +109,9 @@ class RangeChecks:
         self.recheck(proj["slug"], c["id"])
         return (f"Range check #{c['id']} started: decompdecomp tests the functions next to it with the judge before the "
                 f"range applies (one function proves little: C can match with the wrong compiler by chance). "
-                f"compiler_map() shows how it goes; a neighbour may come to an agent as a task.")
+                f"The user follows it on the Suggestions tab; a neighbour may come to an agent as a task. If the "
+                f"neighbours are built by the project's compiler it is dismissed as a quirk by itself, and nothing "
+                f"is left for the user to approve.")
 
     # ------------------------------------------------------------------ evidence
 
