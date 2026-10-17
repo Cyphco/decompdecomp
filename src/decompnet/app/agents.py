@@ -641,9 +641,9 @@ class Manager:
                 name = helper_name(kind, options.get("model") or _config_model(kind),
                                    {s.agent_name for s in self.sessions.values()})
                 s = Session(sid, kind, label, slug, name, dict(options))
-                s.log_path = self.log_dir / f"{sid}.log"
+                s.log_path = self.log_dir / f"{name}.log"  # named like the agent in the Activity feed, which outlives the session id
                 s.secrets.append(options.get("api_key") or "")
-                s.raw("start", f"{label} on {slug} as {name}, model {options.get('model') or 'default'}")
+                s.raw("start", f"{label} ({sid}) on {slug} as {name}, model {options.get('model') or 'default'}")
                 self.sessions[sid] = s
                 threading.Thread(target=self._run, args=(s,), daemon=True, name=f"agent-{sid}").start()
                 ids.append(sid)
@@ -719,13 +719,16 @@ class Manager:
         out = []
         for p in self.log_dir.glob("*.log") if self.log_dir.is_dir() else []:
             st = p.stat()
-            s = self.sessions.get(p.stem)
-            out.append({"id": p.stem, "label": s.label if s else p.stem, "state": s.state if s else "ended",
-                        "size": st.st_size, "t": st.st_mtime})
+            s = next((x for x in self.sessions.values() if x.agent_name == p.stem), None)
+            out.append({"id": p.stem, "label": f"{s.label} · {p.stem}" if s else p.stem,
+                        "state": s.state if s else "ended", "size": st.st_size, "t": st.st_mtime})
         return sorted(out, key=lambda r: -r["t"])
 
     def read_log(self, sid: str, tail: int = 200_000) -> dict:
-        """The end of one helper's log (`tail` bytes, from a line start)."""
+        """The end of one helper's log (`tail` bytes, from a line start). `sid`: its agent name, as the Activity feed
+        shows it, or a running session's id."""
+        if sid in self.sessions:
+            sid = self.sessions[sid].agent_name
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", sid or ""):
             raise ValueError("no such log")
         p = self.log_dir / f"{sid}.log"

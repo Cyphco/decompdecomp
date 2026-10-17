@@ -50,7 +50,7 @@ function renderSessions(sessions) {
       s.usd ? money(s.usd) : s.tokens ? `${(s.tokens / 1000).toFixed(0)}k tokens` : "", s.started_at ? `since ${clock(s.started_at).slice(0, 5)}` : ""].filter(Boolean);
     return `<div class="session"><div class="session-top"><span class="dot ${dot}"></span><b>${esc(s.label)}</b>
         <span class="state ${s.state === "error" ? "err" : ""}">${esc(STATE_TEXT[s.state] || s.state)}</span>
-        <button class="ghost" data-log="${esc(s.id)}" type="button">Log</button>
+        <button class="ghost" data-log="${esc(s.agent)}" type="button">Log</button>
         <button class="ghost" data-stop="${esc(s.id)}" data-remove="${live ? "" : "1"}" type="button">${live ? "Stop" : "Remove"}</button></div>
       <span class="facts-line">${facts.join(" · ")}</span>
       ${s.state === "error" ? `<span class="state err">${esc(s.error)}</span>` : ""}
@@ -74,15 +74,32 @@ function renderSessions(sessions) {
 /* A helper's log, for debugging: what the agent printed (raw), its stderr, the command and prompt it was given, and why it
    stopped. Kept on disk, so it's here after a restart too. */
 async function openAgentLog(id) {
-  const body = dialog(`Log: ${id}`, `<p class="muted small" id="logMeta">Loading…</p>
+  dialog(`Log: ${id}`, `<p class="muted small" id="logMeta">Loading…</p>
     <div class="row"><button class="ghost small-btn" id="logRefresh" type="button">Refresh</button>
       <button class="ghost small-btn" id="logCopy" type="button">Copy</button>
-      <label class="check small"><input type="checkbox" id="logErrs"><span>Only errors and exits</span></label></div>
+      <select id="logMode" aria-label="What to show"><option value="readable">Readable</option><option value="errors">Errors and exits</option><option value="raw">Everything, raw</option></select></div>
     <pre class="agent-log" id="logText"></pre>`);
   let text = "";
+  // The agent prints one JSON object per line; the readable view says what each one did, like the Activity feed does.
+  const short = (v, n = 220) => { const t = typeof v === "string" ? v : JSON.stringify(v); return t.length > n ? `${t.slice(0, n)}…` : t; };
+  const readable = (line) => {
+    const m = line.match(/^(\S+) out\s+(\{.*)$/);
+    if (!m) return line;
+    try {
+      const o = JSON.parse(m[2]);
+      const p = o.part || {};
+      if (o.type === "text") return `${m[1]} says   ${short(p.text || "", 400)}`;
+      if (o.type === "tool_use") return `${m[1]} tool    ${p.tool}${p.state?.status && p.state.status !== "completed" ? ` (${p.state.status})` : ""} ${short(p.state?.input ?? "")}\n${" ".repeat(9)}→ ${short(p.state?.output ?? p.state?.error ?? "", 300)}`;
+      if (o.type === "error") return `${m[1]} ERROR   ${short(o.error ?? o, 400)}`;
+      return null;  // step_start / step_finish: bookkeeping
+    } catch { return line; }
+  };
+  const quiet = /^\S+ err\s+timestamp=\S+ level=(INFO|DEBUG)\b/;  // opencode's own debug chatter
   const show = () => {
-    const only = $("logErrs").checked;
-    const lines = text.split("\n").filter((l) => !only || /^\S+ (err|error|exit|start)\s/.test(l) || /error|exited|503|429|failed/i.test(l));
+    const mode = $("logMode").value;
+    let lines = text.split("\n").filter(Boolean);
+    if (mode === "errors") lines = lines.filter((l) => /^\S+ (error|exit|start)\s/.test(l) || (/^\S+ err\s/.test(l) && !quiet.test(l)) || /level=ERROR|rate limit|\b(429|503)\b|exited|failed/i.test(l));
+    else if (mode === "readable") lines = lines.filter((l) => !quiet.test(l) && !/^\S+ prompt\s/.test(l)).map(readable).filter((l) => l !== null);
     const pre = $("logText");
     pre.textContent = lines.join("\n");
     pre.scrollTop = pre.scrollHeight;
@@ -96,7 +113,7 @@ async function openAgentLog(id) {
     } catch (e) { $("logMeta").textContent = e.message; }
   };
   $("logRefresh").onclick = load;
-  $("logErrs").onchange = show;
+  $("logMode").onchange = show;
   $("logCopy").onclick = () => navigator.clipboard.writeText(text).then(() => toast("Log copied."));
   await load();
 }

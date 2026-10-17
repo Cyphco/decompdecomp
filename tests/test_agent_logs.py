@@ -50,7 +50,8 @@ def test_the_app_reads_the_tail_of_a_log_and_lists_them(tmp_path):
     got = m.read_log("opencode-3", tail=300)
     assert got["truncated"] and got["text"].endswith("event 49\n") and "event 0\n" not in got["text"]
     assert not got["text"].startswith("event")  # starts at a line, not in the middle of one
-    assert [r["id"] for r in m.logs()] == ["opencode-3"] and m.logs()[0]["label"] == "opencode #3"
+    assert [r["id"] for r in m.logs()] == ["opencode-3"] and m.logs()[0]["label"] == "opencode #3 · opencode-3"
+    assert m.read_log("opencode-3")["id"] == "opencode-3"  # by session id too: it resolves to the agent's file
     m.sessions.clear()  # after a restart the file is still there
     assert m.logs()[0]["state"] == "ended"
 
