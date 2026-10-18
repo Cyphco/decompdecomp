@@ -223,3 +223,68 @@ def test_a_function_can_be_set_aside_as_assembly(tmp_path):
         n.mark_assembly("p", "done", "x")
     with pytest.raises(NetworkError, match="why"):
         n.mark_assembly("p", "driver", "  ")
+
+
+def _gba_net(tmp_path):
+    import struct
+
+    from decompnet.app.engine import RomNetwork
+
+    base = 0x08000000
+    rom = bytearray(0x400)
+    rom[0:4] = bytes([0x00, 0x48, 0x70, 0x47])  # ldr r0,[pc,#0] ; bx lr
+    rom[4:8] = struct.pack("<I", 0x12345678)  # its literal
+    rom[0x10:0x16] = bytes([0x00, 0x00, 0x70, 0xB5, 0x70, 0xBD])  # alignment halfword, push {r4-r6,lr} ; pop {r4-r6,pc}
+    (tmp_path / "rom.gba").write_bytes(bytes(rom))
+    cfg = {"kind": "rom", "platform": "gba", "rom": {"file": "rom.gba"},
+           "segments": [{"name": "rom", "rom_start": 0, "rom_end": 0x400, "vram": base}],
+           "compiler": {"toolchain": "agbcc", "flags": ["-O2"]}}
+    n = RomNetwork(tmp_path / "t.db", tmp_path)
+    with n.store.tx() as db:
+        db.execute("INSERT INTO projects(id,slug,name,arch,root,config) VALUES(1,'p','P','thumb',?,?)", (str(tmp_path), json.dumps(cfg)))
+        for name, vram, size, status in (("A", base, 6, "open"), ("B", base + 6, 2, "open"), ("C", base + 8, 8, "matched"),
+                                         ("D", base + 0x10, 6, "open")):
+            db.execute("INSERT INTO functions(project_id,name,vram,rom_offset,size,n_insns,target,relocs,status,unit) "
+                       "VALUES(1,?,?,?,?,?,?,'[]',?,'')", (name, vram, vram - base, size, size // 2, bytes(rom[vram - base:vram - base + size]), status))
+            db.execute("INSERT INTO symbols(project_id,name,address,size,kind) VALUES(1,?,?,?,'func')", (name, vram, size))
+    return n, base, bytes(rom)
+
+
+def test_a_functions_end_follows_its_own_literal_and_absorbs_the_bogus_row(tmp_path):
+    import pytest
+
+    from decompnet.network import NetworkError
+
+    n, base, rom = _gba_net(tmp_path)
+    with pytest.raises(NetworkError, match="B lie inside"):
+        n.set_bounds("p", "A", end=base + 8)  # B is in the way: it has to be named
+    with pytest.raises(NetworkError, match="halfword-aligned"):
+        n.set_bounds("p", "A", end=base + 7, absorb=["B"])
+    out = n.set_bounds("p", "A", end=base + 8, absorb=["B"], reason="its ldr reads the literal at +4")
+    assert out["size"] == 8 and out["absorbed"] == ["B"] and out["matched"] is False
+    a = n.store.one("SELECT * FROM functions WHERE name='A'")
+    assert a["size"] == 8 and a["n_insns"] == 4 and bytes(a["target"]) == rom[0:8]
+    b = n.store.one("SELECT status, meta FROM functions WHERE name='B'")
+    assert b["status"] == "asm" and "part of A" in b["meta"]
+    assert n.store.one("SELECT size FROM symbols WHERE name='A'")["size"] == 8
+    assert "A: 0x08000000+6 -> 0x08000000+8" in n.store.one("SELECT detail FROM events WHERE kind='boundary'")["detail"]
+    with pytest.raises(NetworkError, match="matched"):
+        n.set_bounds("p", "C", end=base + 0x10)
+
+
+def test_a_function_that_starts_on_alignment_gets_its_real_start(tmp_path):
+    n, base, rom = _gba_net(tmp_path)
+    out = n.set_bounds("p", "D", start=base + 0x12)
+    assert (out["start"], out["size"]) == (base + 0x12, 4)
+    d = n.store.one("SELECT vram, rom_offset, size, target FROM functions WHERE name='D'")
+    assert (d["vram"], d["rom_offset"], d["size"], bytes(d["target"])) == (base + 0x12, 0x12, 4, rom[0x12:0x16])
+    assert n.store.one("SELECT address FROM symbols WHERE name='D'")["address"] == base + 0x12
+
+
+def test_a_suggestion_is_closed_with_a_note(tmp_path):
+    n, base, _ = _gba_net(tmp_path)
+    n._update_cfg("p", lambda cfg: cfg.__setitem__("suggestions", [{"id": 1, "text": "t", "toolchain": None, "flags": [], "ranges": [],
+                                                                  "agents": ["x"], "check": None, "status": "open", "t": 1.0}]))
+    n.close_suggestion("p", 1, "applied", "A now ends at 0x08000008")
+    row = n._suggestion_log(n.cfg(n._project("p")))[0]  # what the Suggestions tab lists
+    assert row["status"] == "applied" and row["resolution"] == "A now ends at 0x08000008"

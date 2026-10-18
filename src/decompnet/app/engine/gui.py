@@ -67,7 +67,7 @@ class GuiMixin:
         rows = []
         for s in cfg.get("suggestions", []):
             c = checks.get(s["id"])
-            rows.append({**{k: s.get(k) for k in ("id", "text", "toolchain", "flags", "ranges", "agents", "check", "status", "t")},
+            rows.append({**{k: s.get(k) for k in ("id", "text", "toolchain", "flags", "ranges", "agents", "check", "status", "t", "resolution")},
                          "range_check": None if c is None else {"id": c["id"], "status": c["status"], "said": c.get("said", "")}})
         return sorted(rows, key=lambda r: r["t"] or 0, reverse=True)[:limit]
 

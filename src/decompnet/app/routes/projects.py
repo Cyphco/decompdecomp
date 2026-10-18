@@ -144,6 +144,13 @@ def register(app: App) -> None:
         reason = str(data.get("reason", ""))
         return {"done": [net.mark_assembly(slug, str(n), reason) for n in (data.get("names") or [])]}
 
+    def p_bounds(slug, request, data):
+        """Set where a GBA function starts and ends: {name, start?, end?, absorb?: [names], reason?}."""
+        def addr(v):
+            return None if v in (None, "") else int(str(v), 0)
+        return net.set_bounds(slug, str(data.get("name", "")), addr(data.get("start")), addr(data.get("end")),
+                              [str(n) for n in data.get("absorb") or []], str(data.get("reason", "")))
+
     def p_note(slug, request, data):
         """A note from you on a function (or the whole project): agents read notes when they claim it."""
         agent, _ = net.local_agent("you")
@@ -178,7 +185,7 @@ def register(app: App) -> None:
         "/api/try": (p_try, ["POST"]), "/api/release": (p_release, ["POST"]),
         "/api/autopilot": (p_autopilot, ["POST"]), "/api/instructions": (p_instructions, ["POST"]), "/api/title": (p_title, ["POST"]),
         "/api/priority": (p_priority, ["POST"]), "/api/note": (p_note, ["POST"]),
-        "/api/extents": (p_extents, ["GET", "POST"]), "/api/assembly": (p_assembly, ["POST"]), "/api/suggestion": (p_suggestion, ["POST"]), "/api/boundary": (p_boundary, ["POST"]),
+        "/api/extents": (p_extents, ["GET", "POST"]), "/api/assembly": (p_assembly, ["POST"]), "/api/bounds": (p_bounds, ["POST"]), "/api/suggestion": (p_suggestion, ["POST"]), "/api/boundary": (p_boundary, ["POST"]),
         "/api/stats": (lambda s, r, d: net.stats(s), ["GET"]),
         "/api/compilermap": (p_compilermap, ["GET", "POST"]),
     }

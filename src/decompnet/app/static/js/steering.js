@@ -120,6 +120,7 @@ function renderSuggestions(ov) {
       ${esc(s.text)}
       ${what ? `<p class="small mono">${esc(what)}</p>` : ""}
       ${s.check ? `<p class="small ${s.check.includes("matches the game") ? "" : "muted"}">${s.check.includes("matches the game") ? "✓ " : ""}${esc(s.check)}</p>` : ""}
+      ${s.resolution ? `<p class="small"><b>${s.status === "applied" ? "Done" : "Closed"}:</b> ${esc(s.resolution)}</p>` : ""}
       ${rc ? `<p class="small muted">range check #${rc.id}: ${esc(rc.status)}${rc.said ? ` · ${esc(rc.said)}` : ""}</p>` : ""}
       ${s.status === "open" ? `<div class="row">${s.toolchain ? `<button class="primary small-btn" type="button" data-apply="${s.id}">Apply</button>` : ""}<button class="ghost small-btn" type="button" data-dismiss="${s.id}">Dismiss</button></div>` : ""}</div>`;
   }).join("") : `<p class="muted small empty">${log.length ? "Nothing here." : "No agent has suggested anything yet. When one does (a compiler or flag change, say), it shows up here."}</p>`);
