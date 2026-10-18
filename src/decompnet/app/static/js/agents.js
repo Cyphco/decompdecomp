@@ -16,7 +16,7 @@ function spark(points, w = 240, h = 34) {
 /* No compile yet: the agent is reading (the function, its file, look-alikes), for this long so far */
 function reading(c) {
   const min = c.claimed_at ? Math.floor((Date.now() / 1000 - c.claimed_at) / 60) : 0;
-  return min >= 1 ? `reading · ${min} min` : "reading";
+  return min >= 1 ? `claimed · ${min} min; activity unverified` : "claimed; activity unverified";
 }
 
 function renderNow(claims) {
@@ -28,7 +28,7 @@ function renderNow(claims) {
     const p = pctOf(c.best_score, c.n_insns);
     const [sym, unit] = c.name.split(/@(.*)/s);  // a fork's symbol@file: the symbol first, the file after it
     return `<div class="job" data-fn="${esc(c.name)}"><div class="job-top"><span class="job-name" title="${esc(c.name)}">${esc(sym)}${unit ? `<small>@${esc(unit)}</small>` : ""}</span><span class="job-who" title="${esc(c.agent)}">${esc(c.agent)}</span></div>
-      ${spark(sc)}<div class="job-foot"><span>${c.n_insns} insns · ${c.attempts} tries</span><b>${p == null ? reading(c) : pctText(p)}</b></div></div>`;
+      ${spark(sc)}<div class="job-foot"><span>claimed · ${c.n_insns} insns · ${c.attempts} tries</span><b>${p == null ? reading(c) : pctText(p)}</b></div></div>`;
   }).join("");
   box.querySelectorAll(".job").forEach((j) => { j.onclick = () => openFn(j.dataset.fn); });
 }

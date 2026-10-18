@@ -213,7 +213,20 @@ def register(mcp, net, manager, jobs, settings, port: int, secret: str) -> None:
             if ap:
                 out.append(f"autopilot: {ap['state']}, {ap['tried']}/{ap['total']} drafts tried, {ap['matched']} matched")
             working = [f"{c['agent']} on {c['name']}" for c in live["claims"] if c["agent"] != "autopilot"]
-            out.append("working now: " + (", ".join(working) if working else "nobody"))
+            out.append("claimed functions (leases, not worker heartbeats): " + (", ".join(working) if working else "none"))
+            pm = ov.get("permuter")
+            if pm:
+                out.append(f"permuter: {pm['state']}, {pm['variants']} generated, {pm.get('scored', 0)} scored, "
+                           f"{pm.get('compile_failed', 0)} compile failures, {pm.get('evaluation_failed', 0)} evaluation failures, "
+                           f"{pm.get('duplicates', 0)} duplicates skipped, {pm['improved']} improved, {pm['matched']} matched")
+            inv = ov.get("inventory")
+            if inv:
+                out.append(f"coverage uses classified code ranges; {inv['counts']['excluded']} data/merged records excluded; "
+                           f"{inv['bytes']['open']} open bytes, {inv['bytes']['assembly']} explicit assembly bytes")
+            ex = ov.get("export")
+            if ex:
+                out.append(f"last full export: {ex.get('matched', 0)} matches, identical={ex.get('identical')}; "
+                           f"current count {ov['matched']} (not a fresh rebuild check)")
             helpers = [f"{s.id} ({s.state})" for s in manager.sessions.values() if s.slug == slug]
             if helpers:
                 out.append("helper agents: " + ", ".join(helpers))

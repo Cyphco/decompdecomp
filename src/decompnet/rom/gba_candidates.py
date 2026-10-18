@@ -36,6 +36,12 @@ def plausible_function(rom: bytes, off: int, limit: int = 0x800) -> bool:
         if (ins.mnemonic == "pop" and "pc" in ins.op_str) or ins.mnemonic == "bx":
             return True
         pos += ins.size
+        if ins.mnemonic == "mov" and ins.op_str.startswith("pc,"):
+            # Harvest Moon's native script callback is 23 KiB, with its switch table before any return.
+            # Keep the ordinary short scan, but follow proven case addresses instead of decoding the table.
+            first = next(md.disasm(rom[off:off + 2], BASE + off, 1), None)
+            if first and first.mnemonic == "push" and "lr" in first.op_str and _switch_returns(rom, pos, off):
+                return True
     return False
 
 
@@ -57,7 +63,7 @@ def _switch_table(rom: bytes, pos: int, lo: int, hi: int) -> tuple[int, list[int
     own address among them) and the table: consecutive words that point back into this function. Without one,
     (pos, [])."""
     scan = (pos + 3) & ~3
-    while scan < min(hi, pos + 72) and not lo <= (rom[scan] | rom[scan + 1] << 8 | rom[scan + 2] << 16 | rom[scan + 3] << 24) - BASE < hi:
+    while scan + 4 <= min(hi, pos + 72) and not lo <= (rom[scan] | rom[scan + 1] << 8 | rom[scan + 2] << 16 | rom[scan + 3] << 24) - BASE < hi:
         scan += 4
     cases = []
     while scan + 4 <= hi:
@@ -67,6 +73,35 @@ def _switch_table(rom: bytes, pos: int, lo: int, hi: int) -> tuple[int, list[int
         cases.append((v & ~1) - BASE)
         scan += 4
     return (scan, cases) if cases else (pos, [])
+
+
+def _switch_returns(rom: bytes, pos: int, start: int) -> bool:
+    """A bounded path from a switch case to a return, without decoding its table or following callees."""
+    end = min(len(rom), start + 0x10000)
+    after, cases = _switch_table(rom, pos, start, end)
+    # The table's own literal pointer can precede it. Neither that pointer nor entries into the table are code.
+    pending = sorted({a for a in cases if after <= a < end})
+    if len(pending) < 2:
+        return False
+    md, seen = _md(), set()
+    while pending and len(seen) < 4096:
+        at = pending.pop()
+        while after <= at < end and at not in seen and len(seen) < 4096:
+            seen.add(at)
+            ins = next(md.disasm(rom[at:at + 4], BASE + at, 1), None)
+            if ins is None:
+                break
+            if _is_return(ins):
+                return True
+            target = _target(ins)
+            if target is not None:
+                pending.append(target - BASE)
+                if ins.mnemonic == "b":
+                    break
+            if ins.mnemonic == "mov" and ins.op_str.startswith("pc,"):
+                break
+            at += ins.size
+    return False
 
 
 def bodies(rom: bytes, known: list[int], literals: set[int] | None = None, switches: bool = True):
@@ -150,13 +185,13 @@ def candidates(rom: bytes, known: list[int]) -> list[int]:
         if (prologue and (after_return or after_padding or prev == 0)) or after_return or after_padding:
             if plausible_function(rom, off):
                 out.add(BASE + off)
-    for _, _, body in bodies(rom, known, literals):  # whatever known code calls is a function
+    for start, end, body in bodies(rom, known, literals):  # calls outside the caller can reveal functions
         for ins in body:
             if ins.mnemonic == "bl":
                 m = re.match(r"#(0x[0-9a-f]+)", ins.op_str)
                 target = int(m.group(1), 16) - BASE if m else -1
                 if 0xC0 <= target < len(rom) and BASE + target not in known_set and target not in literals \
-                        and plausible_function(rom, target):
+                        and not start <= target < end and plausible_function(rom, target):
                     out.add(BASE + target)
     for off in range(0, len(rom) - 4, 4):  # pointers to Thumb code (low bit set)
         word = int.from_bytes(rom[off:off + 4], "little")

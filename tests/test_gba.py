@@ -121,6 +121,21 @@ def test_luvdis_survives_code_that_pops_more_than_it_pushed(tmp_path):
     assert at in found and "func_start" in asm
 
 
+def test_luvdis_reserves_names_of_functions_whose_start_was_repaired(tmp_path):
+    """A moved sub_<old address> and an unnamed entry at its old address must have different labels."""
+    from decompnet.rom import gba
+
+    rom = bytearray(0x200)
+    at = gba.BASE + len(rom)
+    rom += bytes.fromhex("7047 0000 00b5 00bd")  # bx lr; alignment; push lr; pop pc
+    name = f"sub_{at:08X}"
+    (tmp_path / "rom.gba").write_bytes(rom)
+    (tmp_path / "in.cfg").write_text(f"thumb_func 0x{at:X}\nthumb_func 0x{at + 4:X} {name}\n")
+    asm, _ = gba._luvdis(tmp_path / "rom.gba", tmp_path, tmp_path / "in.cfg", guess=False)
+    assert asm.count(f"\n{name}:") == 1
+    assert f"_auto_{at:08X}:" in asm
+
+
 def test_a_helper_linked_twice_gets_two_names(tmp_path, monkeypatch):
     """Two copies of libgcc's _call_via_r3 (Spyro Orange) broke the import on the functions' unique names."""
     from decompnet.rom import gba

@@ -52,6 +52,22 @@ def test_every_solution_matches(net, agents):
         assert status_of(net, name) == "matched"
 
 
+def test_replacing_matched_source_requires_a_match_and_keeps_original_credit(net, agents):
+    alice, bob = agents
+    source = SOLUTIONS["clamp_s32"]
+    net.attempt(alice, "clamp_s32", source)
+    before = net.store.one("SELECT * FROM functions WHERE name='clamp_s32'")
+    with pytest.raises(NetworkError, match="must still match"):
+        net.replace_matched_source(bob, "clamp_s32", WRONG_CLAMP)
+    assert net.store.one("SELECT matched_source FROM functions WHERE name='clamp_s32'")["matched_source"] == source
+    corrected = source + "\n/* checked source correction */\n"
+    assert net.replace_matched_source(bob, "clamp_s32", corrected)["matched"]
+    after = net.store.one("SELECT * FROM functions WHERE name='clamp_s32'")
+    assert after["matched_source"] == after["best_source"] == corrected
+    assert (after["status"], after["matched_agent_id"], after["matched_at"]) == (
+        before["status"], before["matched_agent_id"], before["matched_at"])
+
+
 def test_wrong_attempt_gets_scored_diff(net, agents):
     alice, _ = agents
     out = net.compile_and_diff(alice, "clamp_s32", WRONG_CLAMP)

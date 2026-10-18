@@ -54,7 +54,12 @@ def compiler_for(cfg: dict, vram: int | None) -> dict:
     San Andreas: EE-GCC 2.95.3, and CodeWarrior 3.0.1 -O3 for some of its code), else the project's."""
     for r in cfg.get("compiler_ranges") or []:
         if vram is not None and r["start"] <= vram < r["end"]:
-            return {**cfg["compiler"], "toolchain": r["toolchain"], "flags": r["flags"]}
+            own = {**cfg["compiler"], "toolchain": r["toolchain"], "flags": r["flags"]}
+            if r["toolchain"] != cfg["compiler"].get("toolchain"):
+                own.pop("variant", None)
+            if "variant" in r:
+                own["variant"] = r["variant"]
+            return own
     return cfg["compiler"]
 
 
@@ -87,7 +92,15 @@ def compiler_config(root: Path, cfg: dict) -> CompilerConfig:
             base = [x for a in tc.cmd for x in (flags if a == "{flags}" else [a])]
         else:
             base = [*tc.cc, *flags, "-I{include}", "{src}", "-o", "{obj}"]
+        variant = c.get("variant")
+        if variant:
+            # Both agbcc snapshots ship in the same pinned archive. Some GBA translation units need the older one;
+            # preserving that choice avoids invalidating their matches when the project compiler is restored.
+            if tc.id != "agbcc" or variant != "old_agbcc":
+                raise ValueError("the supported compiler variant is agbcc's old_agbcc")
+            base = [a.replace("{tc}/bin/agbcc", "{tc}/bin/old_agbcc") for a in base]
         cmd = [a.replace("{tc}", tc_dir) for a in base]
+        prelude = prelude.replace("{tc}", tc_dir)
         for dep in tc.requires:  # {tc:<id>} is another toolchain this one needs
             where = toolchains.path(dep, linux)
             cmd = [a.replace(f"{{tc:{dep}}}", wsl.path(where) if linux else str(where)) for a in cmd]

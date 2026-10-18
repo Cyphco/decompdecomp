@@ -18,6 +18,9 @@ start). Keep this table true when a feature ships or reaches another platform.
 | Machine drafts (m2c, Ghidra for x86) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ Ghidra | by architecture |
 | Autopilot: free matches from drafts | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
 | Twins: free matches from identical code | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Persistent bounded permuter retries and outcome counters | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Retry hypotheses and separate behavior candidates (ROM mode) | ✓ | ✓ | ✓ | ✓ | — | — | — | — |
+| Code coverage excludes classified data/merged fragments (ROM mode) | ✓ | ✓ | ✓ | ✓ | — | — | — | — |
 | Permuter on near misses | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Hand-written assembly set aside | ✓ | ✓ | ✓ | — | ✓ | — | — | MIPS, PowerPC |
 | Kernel and BIOS stubs set aside | — | ✓ | ✓ | — | — | — | — | — |
@@ -39,6 +42,13 @@ Where to start on a gap:
 - **Function-end reports** cut MIPS functions (`engine._cut`); GBA has its own splitter (`_split_gba`).
 
 ## Recently done
+
+- **GBA C++ builds**: pinned agbcp and historical STLport headers can be selected for individual functions;
+  exported C++ keeps template helpers and uses the same compiler prelude and language selection as the judge.
+- **GBA export recovery**: isolate saved batch sources, preserve halfword function boundaries and shared literals,
+  and rebuild matches that used the older agbcc snapshot bundled with the pinned toolchain. Compiler variants can
+  be saved for exact address ranges, checked against existing matches, and carried into exported builds. The local
+  source editor can save a correction to matched C after another successful match, preserving the original credit.
 
 - **Range checks** (MIPS ROM projects). An agent's "this range was built by another compiler" is a hypothesis: the
   judge tests the functions next to it (their matches, agents' attempts, the survey, habits), and where nothing

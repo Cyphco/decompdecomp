@@ -379,13 +379,15 @@ class CompilerMixin:
             "status", "applied" if apply else "dismissed"))
 
     def set_compiler_ranges(self, slug: str, ranges: list[list[int]], toolchain: str | None,
-                            flags: list[str] | None = None, reopen: bool = False) -> None:
+                            flags: list[str] | None = None, reopen: bool = False, variant: str | None = None) -> None:
         """Address ranges built by another compiler than the rest of the game (replacing ranges they overlap), or
         with toolchain None: those ranges back to the project's compiler. Matched functions that wouldn't match any
         more stop it, unless `reopen` (removing a range the user judged a quirk: Ridge Racer V's two GCC 2.96 ranges
         held two functions whose C only matched with 2.96): then they're open again, their C their best attempt."""
         if self.fork_slug(slug):
             raise NetworkError("a fork builds with the project's own compilers and flags")
+        if variant and (toolchain != "agbcc" or variant != "old_agbcc"):
+            raise NetworkError("the supported compiler variant is agbcc's old_agbcc")
         if toolchain:
             cfg = self.cfg(self._project(slug))
             toolchain = toolchains.get(toolchain).id
@@ -397,7 +399,8 @@ class CompilerMixin:
         def change(cfg):
             keep = [r for r in cfg.get("compiler_ranges", []) if all(r["end"] <= a or r["start"] >= b for a, b in ranges)]
             if toolchain:
-                keep += [{"start": a, "end": b, "toolchain": toolchain, "flags": flags} for a, b in ranges]
+                keep += [{"start": a, "end": b, "toolchain": toolchain, "flags": flags,
+                          **({"variant": variant} if variant else {})} for a, b in ranges]
             cfg["compiler_ranges"] = sorted(keep, key=lambda r: r["start"])
         self._update_cfg(slug, change)
         proj = self._project(slug)

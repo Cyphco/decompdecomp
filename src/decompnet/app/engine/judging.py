@@ -155,6 +155,7 @@ class JudgeMixin:
             raise NetworkError(f"{fn['name']} is claimed by {self._agent_name(claim['agent_id'])}")
         if len(sources) == 1:
             return self.attempt(agent, function, sources[0], project)["text"]
+        self.check_retry(fn, proj)
         ctx = self._context(proj["id"], fn["unit"])
         target = self._target_obj(fn, proj)
         lines, scored = [], []

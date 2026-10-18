@@ -49,10 +49,10 @@ def _runs(lines: list[str]) -> list[tuple[int, int, bytes]]:
 
 
 def _decode(md, data: bytes, base: int, end: int, targets: set[int], label: Callable[[int], str],
-            lo: int, hi: int) -> tuple[list[str], float]:
+            lo: int, hi: int, pool: set[int] | None = None) -> tuple[list[str], float]:
     """Thumb code for data[base-lo : end-lo] at address `base`: literal-pool words (found from the `ldr rN, [pc, #x]`
     reading them) as `.4byte`, branch targets as labels. Returns the lines and the share that was not valid code."""
-    pool: set[int] = set()
+    pool = set() if pool is None else pool
     body: list[tuple[int, str]] = []
     bad = total = 0
     addr = base
@@ -139,11 +139,12 @@ def repair(text: str, vram: int, data: bytes, label: Callable[[int], str] = lamb
         plan.append((first, last, words, vram + off + 4 * words, vram + off + len(raw)))
     if not plan:
         return text
-    for _, _, _, start, end in plan:  # first pass: every branch target, whichever stretch it is in
-        _decode(md, data, start, end, targets, label, lo, hi)
+    pool: set[int] = set()  # an earlier raw run may load a literal in a later run
+    for _, _, _, start, end in plan:  # first pass: every branch target and literal, whichever stretch it is in
+        _decode(md, data, start, end, targets, label, lo, hi, pool)
     out, cursor = [], 0
     for first, last, words, start, end in plan:
-        new, bad = _decode(md, data, start, end, set(targets), label, lo, hi)
+        new, bad = _decode(md, data, start, end, set(targets), label, lo, hi, pool)
         if bad > MAX_BAD:
             continue
         table = [f"\t.4byte 0x{struct.unpack_from('<I', data, start - vram - 4 * words + 4 * k)[0]:08X}" for k in range(words)]

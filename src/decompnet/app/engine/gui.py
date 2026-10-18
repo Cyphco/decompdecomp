@@ -79,6 +79,8 @@ class GuiMixin:
             "SELECT COUNT(*) AS total, SUM(status='matched') AS matched, SUM(size) AS bytes, "
             "SUM(CASE WHEN status='matched' THEN size ELSE 0 END) AS matched_bytes, SUM(attempts) AS attempts "
             "FROM functions WHERE project_id=?", proj["id"])
+        from ...workstate import coverage
+        inventory = coverage(self.store.all("SELECT status,size,vram,meta FROM functions WHERE project_id=?", proj["id"]))
         tc = toolchains.get(cfg["compiler"]["toolchain"])
         return {
             "slug": proj["slug"], "title": proj["name"], "description": proj["description"],
@@ -89,8 +91,9 @@ class GuiMixin:
                          "installed": toolchains.installed(tc.id) is not None, "proprietary": tc.proprietary,
                          "supported": tc.supported, "wsl": tc.via_wsl,
                          "why": None if tc.supported else toolchains.unsupported_cpu()},
-            "functions": agg["total"] or 0, "matched": agg["matched"] or 0, "bytes": agg["bytes"] or 0,
-            "matched_bytes": agg["matched_bytes"] or 0, "attempts": agg["attempts"] or 0,
+            "functions": (agg["total"] or 0) - inventory["counts"]["excluded"], "matched": agg["matched"] or 0,
+            "bytes": inventory["code_bytes"], "matched_bytes": inventory["bytes"]["matched"],
+            "inventory_records": agg["total"] or 0, "inventory": inventory, "attempts": agg["attempts"] or 0,
             "context_version": self._context(proj["id"])["version"],
             "folder": proj["root"],
             "export": cfg.get("export"),
@@ -269,7 +272,7 @@ class GuiMixin:
             "FROM attempts t JOIN functions f ON f.id=t.function_id LEFT JOIN agents a ON a.id=t.agent_id "
             "WHERE f.project_id=? AND t.id>? ORDER BY t.id DESC LIMIT 80", proj["id"], since_attempt)
         claims = self.store.all(
-            "SELECT f.name, f.n_insns, f.best_score, f.attempts, a.name AS agent, c.claimed_at FROM claims c "
+            "SELECT f.name, f.n_insns, f.best_score, f.attempts, a.name AS agent, c.claimed_at, c.expires_at, a.last_seen FROM claims c "
             "JOIN functions f ON f.id=c.function_id JOIN agents a ON a.id=c.agent_id WHERE f.project_id=?", proj["id"])
         claims = [dict(c) for c in claims]
         if slug in self.links:

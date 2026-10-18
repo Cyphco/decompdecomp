@@ -44,6 +44,19 @@ CREATE TABLE IF NOT EXISTS symbols(
   project_id INTEGER NOT NULL, name TEXT NOT NULL, address INTEGER NOT NULL, size INTEGER NOT NULL DEFAULT 0,
   kind TEXT NOT NULL DEFAULT 'data', preview TEXT, PRIMARY KEY(project_id, name));
 CREATE INDEX IF NOT EXISTS idx_symbols_addr ON symbols(project_id, address);
+CREATE TABLE IF NOT EXISTS retry_plans(
+  function_id INTEGER PRIMARY KEY, hypothesis TEXT NOT NULL, identity TEXT NOT NULL,
+  attempts_start INTEGER NOT NULL, best_score INTEGER, created_at REAL);
+CREATE TABLE IF NOT EXISTS candidate_checks(
+  id INTEGER PRIMARY KEY, function_id INTEGER NOT NULL, source TEXT NOT NULL, identity TEXT NOT NULL,
+  evidence TEXT NOT NULL, verdict TEXT NOT NULL, agent_id INTEGER, created_at REAL);
+CREATE INDEX IF NOT EXISTS idx_candidate_checks_fn ON candidate_checks(function_id);
+CREATE TABLE IF NOT EXISTS permuter_runs(
+  function_id INTEGER NOT NULL, identity TEXT NOT NULL, turns INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(function_id, identity));
+CREATE TABLE IF NOT EXISTS permuter_trials(
+  function_id INTEGER NOT NULL, identity TEXT NOT NULL, source_hash TEXT NOT NULL, outcome TEXT NOT NULL,
+  PRIMARY KEY(function_id, identity, source_hash));
 CREATE TABLE IF NOT EXISTS twin_misses(
   function_id INTEGER NOT NULL, source_hash TEXT NOT NULL, project_id INTEGER, at REAL, why TEXT,
   PRIMARY KEY(function_id, source_hash));

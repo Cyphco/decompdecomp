@@ -56,7 +56,7 @@ def register(app: App) -> None:
         elif str(data.get("ranges") or "").strip():  # these address ranges only (or back to the project's: remove)
             net.set_compiler_ranges(slug, parse_ranges(str(data["ranges"])),
                                     None if data.get("remove") else str(data.get("toolchain", "")), data.get("flags") or None,
-                                    reopen=bool(data.get("reopen")))
+                                    reopen=bool(data.get("reopen")), variant=data.get("variant"))
         else:
             net.set_compiler(slug, str(data.get("toolchain", "")), data.get("flags") or None)
         return net.overview(slug)
@@ -111,7 +111,8 @@ def register(app: App) -> None:
     def p_try(slug, request, data):
         """You, editing a function in the GUI: judged like an agent's attempt (and credited to "you")."""
         agent, _ = net.local_agent("you")
-        res = net.attempt(agent, str(data.get("name", "")), str(data.get("source", "")), slug)
+        submit = net.replace_matched_source if data.get("replace") else net.attempt
+        res = submit(agent, str(data.get("name", "")), str(data.get("source", "")), slug)
         return {"score": res["score"], "matched": res["matched"], "text": res["text"][-4000:]}
 
     def p_release(slug, request, data):

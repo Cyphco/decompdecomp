@@ -27,7 +27,7 @@ _LABEL = re.compile(r"\b(_[0-9A-F]{8})\b")
 
 try:
     from decompnet import toolchains
-    from decompnet.compiler import run_in
+    from decompnet.compiler import compile_source
     from decompnet.project import compiler_config
 except ImportError:
     sys.exit("This build uses decompdecomp's pinned tools: install decompdecomp first (https://github.com/n-delic/decompdecomp).")
@@ -64,14 +64,15 @@ def disassemble() -> None:
     print("disassembling your copy (luvdis)")
     work = ROOT / "build" / "luvdis"
     work.mkdir(parents=True, exist_ok=True)
-    text, _ = _luvdis(ROOT / B["image"], work, ROOT / "functions.cfg")
+    text, _ = _luvdis(ROOT / B["image"], work, ROOT / "functions.cfg", guess=False)
     end = text.index("@ End embedded Luvdis macros")
     end = text.index("\n", end) + 1
     asm = ROOT / "asm"
     asm.mkdir(exist_ok=True)
     (asm / "macros.inc").write_text(text[:end].replace(".syntax unified\n", "").replace(".text\n", ""),
                                     encoding="utf-8")
-    addr = {f["name"]: f["addr"] for f in B["functions"]}
+    functions = {f["name"]: f for f in B["functions"]}
+    addr = {name: f["addr"] for name, f in functions.items()}
     pieces, cur, lines = [], B["base"], []
 
     def flush() -> None:
@@ -85,7 +86,8 @@ def disassemble() -> None:
 
     for line in text[end:].splitlines():
         m = _START.match(line)
-        if m and m.group(1) in addr and addr[m.group(1)] % 4 == 0 and addr[m.group(1)] != cur:
+        if (m and m.group(1) in addr and (addr[m.group(1)] % 4 == 0 or c_source(functions[m.group(1)]))
+                and addr[m.group(1)] != cur):
             flush()
             cur, lines = addr[m.group(1)], []
         lines.append(line)
@@ -94,11 +96,11 @@ def disassemble() -> None:
 
 
 def c_source(fn: dict) -> str | None:
-    path = fn.get("c") or f"src/{fn['name']}.c"
-    return path if (ROOT / path).exists() and fn["addr"] % 4 == 0 else None
+    paths = [fn["c"]] if fn.get("c") else [f"src/{fn['name']}.{ext}" for ext in ("c", "cpp")]
+    return next((path for path in paths if (ROOT / path).exists()), None)
 
 
-def trim(path: Path) -> None:
+def trim(path: Path, alignment: int = 4, extent: int | None = None) -> None:
     """Shrink a compiled object's .text to where its function ends. The assembler pads Thumb code to a whole word
     with `nop`; in the game the next function's alignment supplied those bytes (and they may differ)."""
     import struct
@@ -113,9 +115,15 @@ def trim(path: Path) -> None:
     ends: dict[int, int] = {}
     for shndx, off, size in _function_symbols(elf).values():
         ends[shndx] = max(ends.get(shndx, 0), (off & ~1) + size)
+    if extent is not None:
+        for index, section in enumerate(elf.iter_sections()):
+            if section.name == ".text":
+                ends[index] = min(section["sh_size"], extent)
     shoff, shentsize = struct.unpack_from("<I", data, 0x20)[0], struct.unpack_from("<H", data, 0x2E)[0]
     for shndx, end in ends.items():
         sec = elf.get_section(shndx)
+        if sec["sh_addralign"] > alignment:
+            struct.pack_into("<I", data, shoff + shndx * shentsize + 32, alignment)
         relocated = any(r["r_offset"] >= end for rs in elf.iter_sections()
                         if rs.header["sh_type"] in ("SHT_REL", "SHT_RELA") and rs["sh_info"] == shndx
                         for r in rs.iter_relocations())
@@ -128,34 +136,60 @@ def trim(path: Path) -> None:
 def build_objects() -> tuple[list[dict], dict[str, str]]:
     """Assemble every piece and compile every C function: (pieces, function name -> its C object)."""
     pieces = json.loads((ROOT / "asm" / "pieces.json").read_text(encoding="utf-8"))
-    for p in pieces:
+    functions = {f["name"]: f for f in B["functions"]}
+    for index, p in enumerate(pieces):
         p["obj"] = f"build/{Path(p['src']).with_suffix('.o').as_posix()}"
+        fn = functions.get(p["name"])
+        if fn and c_source(fn) and fn["addr"] == p["addr"]:
+            continue  # replaced by verified C; halfword-aligned reference pieces need not assemble on their own
         target = ROOT / p["obj"]
         target.parent.mkdir(parents=True, exist_ok=True)
         if not target.exists() or target.stat().st_mtime < (ROOT / p["src"]).stat().st_mtime:
-            run([arm("as"), *AS_FLAGS, "-o", p["obj"], p["src"]])
-    cfg = compiler_config(ROOT, {"compiler": B["compiler"]})
+            run([arm("as"), *AS_FLAGS, "-o", p["obj"], assembly_input(p)])
+        if index + 1 < len(pieces) and pieces[index + 1]["addr"] % 4:
+            trim(target, extent=pieces[index + 1]["addr"] - p["addr"])
     c_objs = {}
     for fn in B["functions"]:
         src = c_source(fn)
         if not src:
             continue
+        cfg = compiler_config(ROOT, {"compiler": B["compiler"] | fn.get("compiler", {})})
         obj = f"build/{Path(src).with_suffix('.o').as_posix()}"
         (ROOT / obj).parent.mkdir(parents=True, exist_ok=True)
-        argv = [a.replace("{src}", src).replace("{obj}", obj).replace("{include}", "include") for a in cfg.cmd]
-        res = run_in(cfg, ROOT, argv, inputs=[src, "include"], outputs=[obj])
-        if res.returncode != 0 or not (ROOT / obj).exists():
-            fail(f"compiling {src} failed:\n{(res.stdout + res.stderr)[-3000:]}")
-        trim(ROOT / obj)
+        # Use the judge's C/C++ selection and toolchain prelude here too. Running its raw command loses both.
+        cfg.include_dirs = (*cfg.include_dirs, str(ROOT / "include"))
+        res = compile_source(cfg, "", (ROOT / src).read_text(encoding="utf-8"))
+        if not res.ok:
+            fail(f"compiling {src} failed:\n{res.log[-3000:]}")
+        (ROOT / obj).write_bytes(res.obj)
+        trim(ROOT / obj, 2 if fn["addr"] % 4 else 4)
         c_objs[fn["name"]] = obj
     return pieces, c_objs
 
 
-def _text_size(obj: str) -> int:
+def assembly_input(piece: dict) -> str:
+    """Keep external literal pools addressable when a handwritten routine spans several pieces.
+
+    Thumb literal loads have no relocation for another object's label. Define those pool addresses relative to
+    this piece's text section before including the untouched reference assembly (Harvest Moon's decompressor).
+    """
+    text = (ROOT / piece["src"]).read_text(encoding="utf-8")
+    own = set(re.findall(r"^(_[0-9A-F]{8}):", text, re.M))
+    pools = set(re.findall(r"\bldr\s+r\d+,\s*(_[0-9A-F]{8})\b", text)) - own
+    if not pools:
+        return piece["src"]
+    path = ROOT / "build" / "asm-input" / Path(piece["src"]).name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(f".set {lab}, .text + {int(lab[1:], 16) - piece['addr']}\n" for lab in sorted(pools))
+                    + f'.include "{piece["src"]}"\n', encoding="utf-8")
+    return path.relative_to(ROOT).as_posix()
+
+
+def _text_size(obj: str, sections: str = ".text") -> int:
     from elftools.elf.elffile import ELFFile
 
     with open(ROOT / obj, "rb") as f:
-        return sum(s["sh_size"] for s in ELFFile(f).iter_sections() if s.name == ".text")
+        return sum(s["sh_size"] for s in ELFFile(f).iter_sections() if s.name in sections.split())
 
 
 def _globals(obj: str) -> set[str]:
@@ -196,6 +230,7 @@ def layout(pieces: list[dict], c_objs: dict[str, str]) -> list[tuple[int, str, s
 
 
 def linker_script(items: list[tuple[int, str, str]], c_objs: dict[str, str]) -> str:
+    function_aliases(items, c_objs)
     lines = ["/* Generated by build.py: every piece of the ROM at its original address. */", "SECTIONS", "{",
              f"    .rom 0x{B['base']:08X} : AT(0x{B['base']:08X})", "    {"]
     lines += [f"        . = 0x{addr - B['base']:X}; {obj}({sections})" for addr, obj, sections in items]
@@ -211,7 +246,19 @@ def linker_script(items: list[tuple[int, str, str]], c_objs: dict[str, str]) -> 
     lines += ["    /DISCARD/ : { *(.comment) *(.note*) }", "}", ""]
     linked = {obj for _, obj, _ in items}
     defined = set().union(*(_globals(obj) for obj in linked))
-    wanted = {fn["name"]: fn["addr"] for fn in B["functions"]} | B["symbols"]
+    # An absolute Thumb symbol needs its low bit set, too; otherwise ld assumes ARM and inserts interworking
+    # veneers into the ROM, shifting later pieces (functions inside a replaced assembly piece have no object).
+    wanted = B["symbols"] | {fn["name"]: fn["addr"] | int(fn["thumb"]) for fn in B["functions"]}
+    from elftools.elf.elffile import ELFFile
+
+    for obj in c_objs.values():
+        with open(ROOT / obj, "rb") as stream:
+            symtab = ELFFile(stream).get_section_by_name(".symtab")
+            for sym in symtab.iter_symbols() if symtab else ():
+                m = re.fullmatch(r"(sub|func|D|B|RO|STR|FLT|DBL|jtbl)_([0-9A-F]{8})", sym.name)
+                if m and sym["st_shndx"] == "SHN_UNDEF":
+                    addr = int(m[2], 16)
+                    wanted.setdefault(sym.name, addr)
     # luvdis's labels (_08001234) jumped to from another piece: their names are their addresses
     for p in json.loads((ROOT / "asm" / "pieces.json").read_text(encoding="utf-8")):
         text = (ROOT / p["src"]).read_text(encoding="utf-8")
@@ -220,6 +267,85 @@ def linker_script(items: list[tuple[int, str, str]], c_objs: dict[str, str]) -> 
         wanted.update({name: int(name[4:], 16) for name in re.findall(r"\b(sub_[0-9A-F]{8})\b", text)})
     lines += [f"{name} = 0x{addr:08X};" for name, addr in sorted(wanted.items(), key=lambda kv: kv[1]) if name not in defined]
     return "\n".join(lines) + "\n"
+
+
+def function_aliases(items: list[tuple[int, str, str]], c_objs: dict[str, str]) -> None:
+    """Give absolute function aliases their ARM/Thumb type so ld does not insert interworking stubs.
+
+    A numeric linker-script assignment loses the Thumb function type even with its low bit set. A tiny object
+    with .thumb_set preserves that type, including old automatic names retained in saved attempts after renames.
+    """
+    from elftools.elf.elffile import ELFFile
+
+    linked = {obj for _, obj, _ in items} | set(c_objs.values())
+    defined = set().union(*(_globals(obj) for obj in linked))
+    known = {f["name"]: (f["addr"], f["thumb"]) for f in B["functions"]}
+    functions = {c_objs[f["name"]]: f for f in B["functions"] if f["name"] in c_objs}
+    image = (ROOT / B["image"]).read_bytes() if B.get("image") else b""
+    pointer_uses = []
+    aliases = {}
+    for obj in sorted(linked):
+        with open(ROOT / obj, "rb") as stream:
+            elf = ELFFile(stream)
+            table = elf.get_section_by_name(".symtab")
+            thumb_calls = set()
+            pointers = {}
+            for section in elf.iter_sections():
+                if section["sh_type"] not in ("SHT_REL", "SHT_RELA"):
+                    continue
+                symbols = elf.get_section(section["sh_link"])
+                thumb_calls.update(symbols.get_symbol(r["r_info_sym"]).name for r in section.iter_relocations()
+                                   if r["r_info_type"] == 10)  # R_ARM_THM_CALL, including calls named D_<address>
+                fn = functions.get(obj)
+                target = elf.get_section(section["sh_info"])
+                if fn is None or target.name != ".text":
+                    continue
+                for relocation in section.iter_relocations():
+                    if relocation["r_info_type"] != 2:  # R_ARM_ABS32 function pointers also need the Thumb bit
+                        continue
+                    symbol = symbols.get_symbol(relocation["r_info_sym"])
+                    if symbol["st_shndx"] != "SHN_UNDEF":
+                        continue
+                    name, offset = symbol.name, relocation["r_offset"]
+                    automatic = re.fullmatch(r"(?:sub|func|D|)_([0-9A-F]{8})", name)
+                    address = B["symbols"].get(name, int(automatic[1], 16) if automatic else None)
+                    position = fn["addr"] - B["base"] + offset
+                    if not 0 <= position <= len(image) - 4:
+                        continue
+                    addend = int.from_bytes(target.data()[offset:offset + 4], "little")
+                    original = int.from_bytes(image[position:position + 4], "little")
+                    pointer_uses.append((name, addend, original))
+                    if address is not None and original & 1 and (address + addend) & 0xFFFFFFFF == original & ~1:
+                        pointers[name] = (address, True)
+            for sym in table.iter_symbols() if table else ():
+                if sym["st_shndx"] != "SHN_UNDEF" or sym.name in defined:
+                    continue
+                m = re.fullmatch(r"(?:sub|func|D|)_([0-9A-F]{8})", sym.name)
+                if sym.name in pointers:
+                    aliases[sym.name] = pointers[sym.name]
+                elif sym.name in thumb_calls and sym.name in B["symbols"]:
+                    aliases[sym.name] = (B["symbols"][sym.name], True)
+                elif sym.name in known:
+                    aliases[sym.name] = known[sym.name]
+                elif m and sym.name in thumb_calls:
+                    aliases[sym.name] = (int(m[1], 16), True)
+    if not aliases:
+        return
+    for name, addend, original in pointer_uses:
+        if name not in aliases:
+            continue
+        address, thumb = aliases[name]
+        linked = ((address & ~1) if thumb else address) + addend
+        if ((linked | int(thumb)) & 0xFFFFFFFF) != original:
+            fail(f"conflicting pointer modes for {name}: review its saved sources before exporting")
+    path = ROOT / "build" / "function-aliases.s"
+    path.write_text("".join(f".global {name}\n.type {name}, %function\n"
+                            + (f".thumb_set {name}, 0x{addr | 1:X}\n" if thumb else f".set {name}, 0x{addr:X}\n")
+                            for name, (addr, thumb) in sorted(aliases.items())), encoding="utf-8")
+    obj = "build/function-aliases.o"
+    run([arm("as"), *AS_FLAGS, "-o", obj, "build/function-aliases.s"])
+    end = max(addr + _text_size(o, sections) for addr, o, sections in items)
+    items.append((end, obj, ".text"))
 
 
 def build() -> bool:
@@ -264,7 +390,7 @@ def check(name: str) -> bool:
     def read(addr: int, n: int) -> bytes | None:
         return image[addr - base:addr - base + n] if base <= addr and addr + n <= base + len(image) else None
 
-    cfg = compiler_config(ROOT, {"compiler": B["compiler"]})
+    cfg = compiler_config(ROOT, {"compiler": B["compiler"] | fn.get("compiler", {})})
     text = (ROOT / src).read_text(encoding="utf-8")
     m = re.match(r'\s*#include "([^"]+)"\s*\n', text)
     header = (ROOT / "include" / m.group(1)).read_text(encoding="utf-8") if m else ""

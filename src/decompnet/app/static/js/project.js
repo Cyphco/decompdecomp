@@ -273,6 +273,11 @@ function renderStats(ov) {
   $("pct").textContent = pctNum(pct);
   $("pctSub").textContent = (ov.bytes ? `${bytes(ov.matched_bytes)} of ${bytes(ov.bytes)}` : "") + linkedText(ov) + (S.today ? ` · ${S.today} matched today` : "");
   $("fnCount").textContent = `${ov.matched.toLocaleString()} / ${ov.functions.toLocaleString()}`;
+  if (ov.inventory) {
+    const inv = ov.inventory;
+    $("pctSub").textContent += ` · classified code · ${bytes(inv.bytes.open)} open · ${bytes(inv.bytes.assembly)} assembly · ${inv.counts.excluded} data/merged entries excluded`;
+    if (ov.export) $("pctSub").textContent += ` · last rebuild: ${ov.export.matched} matches${ov.export.identical ? ", byte-identical" : ""}`;
+  }
   renderAutopilot(ov);
   renderSteering(ov);
   if (S.tab === "source") renderSource(ov);

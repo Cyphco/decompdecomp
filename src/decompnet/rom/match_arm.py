@@ -124,20 +124,31 @@ def link(obj: bytes, name: str, target: ArmTarget, symbols: SymbolTable, read) -
                 code[at:at + 4] = tcode[at:at + 4]
             elif rtype in (R_ARM_THM_CALL,):
                 dest = thumb_bl_dest(tcode, at, pc)
+                # REL branch immediates carry an addend, including the -4 PC bias. Decoding at PC=0
+                # cancels that bias; ignoring it used to accept foo+4 as a byte-exact call to foo.
+                addend = thumb_bl_dest(code, at, 0)
+                if addend is None or (int.from_bytes(code[at + 2:at + 4], "little") & 0xF800) != \
+                        (int.from_bytes(tcode[at + 2:at + 4], "little") & 0xF800):
+                    problem("your Thumb branch instruction differs from the original")
+                    continue
                 base = symbols.resolve(sname)
                 if base is None:
                     problem(f"`{sname}` is not a known function. Call it by the name the assembly shows (like "
                             f"sub_08001234), or give that address this name first with rename_symbol.")
                     continue
-                if dest is None or (dest & ~1) != (base & ~1):
+                if dest is None or (dest & ~1) != (((base & ~1) + addend) & 0xFFFFFFFF):
                     problem(f"you call {sname} where the original calls "
                             f"{symbols.label(dest) if dest is not None else 'something else'}")
                     continue
                 code[at:at + 4] = tcode[at:at + 4]
             elif rtype in (R_ARM_PC24, R_ARM_CALL, R_ARM_JUMP24):
                 dest = arm_b_dest(tcode, at, pc)
+                addend = arm_b_dest(code, at, 0)  # the encoded REL offset includes the ARM -8 PC bias
+                if addend is None or code[at + 3] != tcode[at + 3]:
+                    problem("your ARM branch condition or opcode differs from the original")
+                    continue
                 base = symbols.resolve(sname)
-                if base is None or dest is None or (dest & ~1) != (base & ~1):
+                if base is None or dest is None or (dest & ~1) != (((base & ~1) + addend) & 0xFFFFFFFF):
                     problem(f"you branch to {sname} where the original goes to "
                             f"{symbols.label(dest) if dest is not None else 'something else'}")
                     continue

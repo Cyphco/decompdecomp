@@ -628,3 +628,50 @@ description = "Game Boy Advance disassembler: finds the functions in a ROM and w
 git = "https://github.com/aarant/luvdis"
 commit = "ec3a4e3ee3afe3e9b4a9c7ae8fffc65e1ea2096c"
 pip_extra = ["setuptools<70"]
+
+
+[agbcp]
+name = "agbcp (GBA C++ with STLport 4.1)"
+platform = "GBA"
+arch = "arm"
+license = "GPL-2.0; STLport and HP/SGI permissive headers"
+source = "notyourav/agbcc cp release; STLPORT41B4; StanHash/fomt libagbc++"
+description = "The historical GBA C++ frontend and STLport vector implementation; select only for functions proven with C++."
+cc = ["{tc}/bin/agbcp"]
+flags = ["-quiet", "-fno-exceptions", "-fno-rtti", "-fvtable-thunks", "-mthumb-interwork", "-O2", "-fhex-asm"]
+requires = ["arm-gnu"]
+cplusplus = true
+prelude = '''
+#ifdef __cplusplus
+#include <stl/_config.h>
+#undef __STL_NATIVE_INCLUDE_PATH
+#undef __STL_NATIVE_C_INCLUDE_PATH
+#undef __STL_NATIVE_CPP_C_INCLUDE_PATH
+#undef __STL_NATIVE_CPP_RUNTIME_INCLUDE_PATH
+#define __STL_NATIVE_INCLUDE_PATH {tc}/cpp-include
+#define __STL_NATIVE_C_INCLUDE_PATH {tc}/include
+#define __STL_NATIVE_CPP_C_INCLUDE_PATH {tc}/include
+#define __STL_NATIVE_CPP_RUNTIME_INCLUDE_PATH {tc}/cpp-include
+#include <vector>
+#endif
+'''
+cmd = ["/bin/sh", "-c", '''src="$1"; obj="$2"; inc="$3"; shift 3; case "$src" in *.cpp) ;; *) exit 1 ;; esac; "{tc:arm-gnu}/bin/arm-none-eabi-cpp" -x c++ -nostdinc -undef -D__GNUC__=2 -D__GNUC_MINOR__=9 -D__STL_NO_IOSTREAMS=1 -D__STL_NO_EXCEPTIONS=1 -D__STL_NO_NAMESPACES=1 -I "{tc}/stlport" -I "{tc}/cpp-include" -I "{tc}/include" -I "$inc" "$src" -o "$obj.i" && "{tc}/bin/agbcp" "$@" "$obj.i" -o "$obj.s" && "{tc:arm-gnu}/bin/arm-none-eabi-as" -mcpu=arm7tdmi -o "$obj" "$obj.s"''', "agbcp", "{src}", "{obj}", "{include}", "{flags}"]
+[[agbcp.parts]]
+url = "https://github.com/notyourav/agbcc/releases/download/cp/agbcc.tar.gz"
+file = "agbcp-cp-05a30f03.tar.gz"
+sha256 = "05a30f03ee916563bba29efdc9da64c47909892aa878002cf07e8e7ae5bd32f5"
+platforms = ["linux-x86_64"]
+[[agbcp.parts]]
+url = "https://codeload.github.com/LiveMirror/stlport/tar.gz/62133628b143bac118f7c5cc7395c68cc6cd99d1"
+file = "stlport41b4-62133628.tar.gz"
+sha256 = "82570ed66d729ffc8b1a37619c920a6d4422fa1c2212deb840ca507c460a2294"
+subdir = "stlport-62133628b143bac118f7c5cc7395c68cc6cd99d1/stlport"
+into = "stlport"
+platforms = ["linux-x86_64"]
+[[agbcp.parts]]
+url = "https://codeload.github.com/StanHash/fomt/tar.gz/b8471ae065744869f64283473ed68372f82321c9"
+file = "fomt-cpp-headers-b8471ae0.tar.gz"
+sha256 = "831e68595e5e328d3d2be8158e870b35fb6689f14ba2036540c99b2aace2ed00"
+subdir = "fomt-b8471ae065744869f64283473ed68372f82321c9/tools/libagbc++"
+into = "cpp-include"
+platforms = ["linux-x86_64"]

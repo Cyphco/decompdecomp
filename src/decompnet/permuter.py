@@ -1,6 +1,6 @@
-"""Rewrites of C that keep its meaning but change what the compiler makes of it: statement and declaration order,
-casts, comparison forms, increment styles, `register`. The permuter (app/permute.py) tries them on near misses; the
-judge decides what matches, as for everything else."""
+"""Candidate C rewrites for near misses: declaration order, casts and expression forms.
+Some change behavior; only the exact binary judge can accept them as matches. A lower diff alone is not evidence
+of semantic equivalence, and behavior-reviewed sources are preserved separately."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def _body_bounds(lines: list[str]) -> tuple[int, int]:
 def _swap_statements(lines, rng):
     lo, hi = _body_bounds(lines)
     pairs = [i for i in range(lo, hi - 1) if _STMT.match(lines[i]) and _STMT.match(lines[i + 1])
-             and not _CONTROL.search(lines[i] + lines[i + 1]) and not _DECL.match(lines[i])
+             and not _CONTROL.search(lines[i] + lines[i + 1]) and not _DECL.match(lines[i]) and not _DECL.match(lines[i + 1])
              and lines[i][:len(lines[i]) - len(lines[i].lstrip())] == lines[i + 1][:len(lines[i + 1]) - len(lines[i + 1].lstrip())]]
     if not pairs:
         return None
@@ -102,10 +102,12 @@ def _rewrite(lines, rng):
 
 def _add_cast(lines, rng):
     lo, hi = _body_bounds(lines)
+    # A typedef token or field declaration is not an expression. Harvest Moon's casts frequently landed on u8.
+    locals_ = {m.group(5) for line in lines[lo:hi] if (m := _DECL.match(line))}
     cands = [(i, m) for i in range(lo, hi) if not _DECL.match(lines[i]) and "=" in lines[i]
              # rvalues only: never cast an assignment target, a call, or the base of a member/array access
              for m in re.finditer(r"(?<=[=(,+\-*/&|^ ])(\w+)\b(?!\s*(?:\(|=(?!=)|\+\+|--|\[|\.|->|[-+*/&|^]=))",
-                                  lines[i]) if not m.group(1).isdigit()]
+                                  lines[i]) if m.group(1) in locals_]
     if not cands:
         return None
     i, m = rng.choice(cands)

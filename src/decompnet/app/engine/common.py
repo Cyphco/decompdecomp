@@ -33,12 +33,13 @@ COMPILERS = {
     "mwcps2-2.3.3": "PlayStation 2 games built with CodeWarrior (2000-2001, proprietary)",
     "mwcps2-3.0.1": "PlayStation 2 games built with CodeWarrior (2002-2005, proprietary)",
     "agbcc": "Game Boy Advance games (pret's agbcc, GCC 2.95)",
+    "agbcp": "Game Boy Advance C++ (agbcp with historical STLport)",
 }
 SHORT_NAMES = {"gcc-2.7.2-kmc": "KMC GCC 2.7.2", "ido-7.1": "IDO 7.1", "ido-5.3": "IDO 5.3",
                "gcc-2.7.2-psx": "GCC 2.7.2 (PS1)", "gcc-2.8.1-psx": "GCC 2.8.1 (PS1)", "ee-gcc-2.96": "EE-GCC 2.96",
                "ee-gcc-2.9-991111": "EE-GCC 2.9", "ee-gcc-2.95.2": "EE-GCC 2.95.2 (SN)", "ee-gcc-2.95.3": "EE-GCC 2.95.3 (SN)",
                "ee-gcc-3.2": "EE-GCC 3.2", "mwcps2-2.3.3": "CodeWarrior PS2 2.3.3", "mwcps2-3.0.1": "CodeWarrior PS2 3.0.1",
-               "agbcc": "agbcc"}
+               "agbcc": "agbcc", "agbcp": "agbcp (C++)"}
 # CodeWarrior versions in the `mwcc` pack (GameCube, Wii) and the `mwccarm` pack (DS), and Visual C++ versions (PC),
 # for games started from scratch.
 MW_VERSIONS = {
@@ -67,7 +68,7 @@ TOOLS = {
 BATCH_INSNS = 48
 PLATFORM_COMPILERS = {"n64": ["gcc-2.7.2-kmc", "ido-7.1", "ido-5.3"], "psx": ["gcc-2.7.2-psx", "gcc-2.8.1-psx"],
                       "ps2": ["ee-gcc-2.96", "ee-gcc-2.9-991111", "ee-gcc-2.95.2", "ee-gcc-2.95.3", "ee-gcc-3.2",
-                              "mwcps2-2.3.3", "mwcps2-3.0.1"], "gba": ["agbcc"]}
+                              "mwcps2-2.3.3", "mwcps2-3.0.1"], "gba": ["agbcc", "agbcp"]}
 def parse_ranges(text: str) -> list[list[int]]:
     """Address ranges written "0x10BFD0-0x10CD40, 0x1106C0-0x1107C0" as [[start, end], ...] (end not included)."""
     spans = [[int(a, 16), int(b, 16)] for a, b in re.findall(r"(?:0x)?([0-9A-Fa-f]{5,8})\s*-\s*(?:0x)?([0-9A-Fa-f]{5,8})", text)]

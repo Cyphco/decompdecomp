@@ -82,6 +82,9 @@ Use only the decomp tools. Repeat for up to {count} claims (a batch is one), the
 5. compile_and_diff says when to move on (no better after 4 compiles in a row; up to 10 for big functions):
    then release_function with precise notes (what you tried, what is left) and claim the next one.
 
+On a stalled function, plan_attempt must record a new hypothesis before further compiles. Read prior notes first.
+Use preserve_candidate to keep a behavior-reviewed/tested source, or flag a semantically rejected source,
+separately from its binary similarity score. A better score is not proof of better behavior.
 Write plausible original code, pure C (no inline asm). The compilers are C89: declare every local at the top of its
 block, before any statement (assign it later), and no `for (int i = ...)`: a declaration after code is only reported
 as "syntax error before `x'". Be brief in your messages: work, don't narrate.
@@ -160,8 +163,10 @@ def _project_info(net: RomNetwork, slug: str) -> str:
             + (f"; these address ranges are built with another:{ranges}" if ranges else "") + "\n"
             + (f"this platform's compilers (for try_compiler): {', '.join(ov['compilers'])}\n" if len(ov["compilers"]) > 1 else "")
             + f"progress: {ov['matched']}/{ov['functions']} functions matched ({pct:.1f}% of code), "
-            f"{ov['attempts']} compiles so far, context.h v{ov['context_version']}\n"
-            f"Next: claim_function(). Guides: guide().")
+            f"{ov['attempts']} recorded attempts, context.h v{ov['context_version']}\n"
+            + (f"Coverage is classified code ranges; {ov['inventory']['counts']['excluded']} data/merged records excluded.\n"
+               if ov.get("inventory") else "")
+            + "Next: claim_function(). Guides: guide().")
 
 
 # name -> handler(net, agent, slug, **args); every handler returns text for the model
@@ -211,6 +216,9 @@ HANDLERS: dict[str, Callable[..., str]] = {
     "compiler_map": lambda net, agent, slug, survey=False, check_ranges=False:
         net.compiler_map_text(slug, bool(survey), bool(check_ranges)),
     "list_functions": lambda net, agent, slug, status="open", limit=40: net.list_functions(slug, status, limit),
+    "plan_attempt": lambda net, agent, slug, function, hypothesis: net.plan_attempt(agent, slug, function, hypothesis),
+    "preserve_candidate": lambda net, agent, slug, function, source, evidence, verdict="reviewed":
+        net.preserve_candidate(agent, slug, function, source, evidence, verdict),
     "add_note": lambda net, agent, slug, text, function="": net.add_note(agent, slug, text, function or None),
     "suggest": lambda net, agent, slug, text, compiler="", flags="", function="", ranges="", source="":
         net.suggest(agent, slug, text, compiler, flags, function or None, ranges, source),
@@ -229,7 +237,7 @@ HANDLERS: dict[str, Callable[..., str]] = {
         net.forks.split_file(agent, _fork(net, slug, "split_file"), path, at, new_name, data),
 }
 
-ROM_ONLY = {"get_context", "edit_context", "rename_symbol", "split_function", "report_boundary", "get_class",
+ROM_ONLY = {"get_context", "edit_context", "rename_symbol", "split_function", "report_boundary", "get_class", "plan_attempt", "preserve_candidate",
             "compiler_map"}
 FORK_ONLY = {"read_file", "search_code", "edit_file", "file_status", "split_file"}
 
@@ -390,6 +398,20 @@ def build_mcp(net: RomNetwork, agent_of: Callable[[Context], tuple[Agent, str]])
     async def list_functions(ctx: Context, status: str = "open", limit: int = 40) -> str:
         """List functions by status: open, matched, walls (released again and again without a match) or all."""
         return await run(ctx, "list_functions", status=status, limit=limit)
+
+    @mcp.tool(meta=ALWAYS_LOAD)
+    async def plan_attempt(ctx: Context, function: str, hypothesis: str) -> str:
+        """Authorize a bounded retry of a stalled ROM function. State a new source/compiler hypothesis,
+        the evidence for it, and how it differs from previous attempts. Repeated hypotheses are refused."""
+        return await run(ctx, "plan_attempt", function=function, hypothesis=hypothesis)
+
+    @mcp.tool(meta=ALWAYS_LOAD)
+    async def preserve_candidate(ctx: Context, function: str, source: str, evidence: str,
+                                 verdict: str = "reviewed") -> str:
+        """Keep a candidate and its behavior evidence separately from the lowest binary diff.
+        verdict: reviewed, tested, or rejected. Evidence must explain checks and limits; tested is
+        the caller's reported test result, not a byte-identical match or independent certification."""
+        return await run(ctx, "preserve_candidate", function=function, source=source, evidence=evidence, verdict=verdict)
 
     @mcp.tool(meta=ALWAYS_LOAD)
     async def add_note(ctx: Context, text: str = "", function: str = "", notes: str = "") -> str:

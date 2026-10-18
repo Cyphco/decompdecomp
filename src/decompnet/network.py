@@ -288,7 +288,7 @@ class Network:
         fn = self.claim_row(agent, project, function, strategy)
         if fn is None:
             proj = self._project(project)
-            return f"Nothing left to claim in {proj['slug']} — every open function is matched or claimed. 🎉"
+            return f"No automatically eligible function in {proj['slug']}. Remaining functions may be claimed or need a new retry hypothesis; inspect list_functions."
         return self._brief(fn, agent, header="CLAIMED")
 
     def claim_row(self, agent: Agent, project: str | None = None, function: str | None = None,
@@ -320,7 +320,9 @@ class Network:
                 db.execute("INSERT INTO claims VALUES(?,?,?,?)", (fn["id"], agent.id, now, now + self.claim_ttl))
                 self._event(db, fn["project_id"], agent.id, "claim", fn["name"])
             else:
-                for walls in ("AND f.abandons < ?", ""):  # walls only when nothing else is left
+                # ROM retries require an explicit hypothesis; other project modes retain their queue policy.
+                filters = ("AND f.abandons < ?",) if json.loads(proj["config"]).get("kind") == "rom" else ("AND f.abandons < ?", "")
+                for walls in filters:
                     fn = db.execute(
                         f"""SELECT f.* FROM functions f WHERE f.project_id=? AND f.status='open' {walls}
                             AND f.id NOT IN (SELECT function_id FROM claims)
@@ -372,6 +374,7 @@ class Network:
             lines.append(f"compiled with {own['toolchain']} {' '.join(own['flags'])}: this address range's compiler, "
                          f"not the project's")
         if fn["status"] == "open" and fn["abandons"] >= WALL_ABANDONS:
+            lines.append("Before further compiles, call plan_attempt with a new hypothesis and evidence; the retry budget persists across agents.")
             lines.append(f"WARNING: released {fn['abandons']} times without a match: very likely a wall. Read the notes "
                          f"before spending compiles, and release it again quickly unless you have something new.")
         if claim:
@@ -396,11 +399,13 @@ class Network:
             if fn["best_source"]:
                 lines += ["", f"### Best attempt so far: score {fn['best_score']} by "
                               f"{self._agent_name(fn['best_agent_id'])} ({fn['attempts']} attempts total) — "
-                              f"start from this", "```c", fn["best_source"].strip(), "```"]
+                              f"lowest binary diff, not behavior validation", "```c", fn["best_source"].strip(), "```"]
             elif fn["seed"]:
                 lines += ["", "### Machine-generated starting point (m2c: expect wrong types and names; "
                               "the context header helps)", "```c",
                           fn["seed"].strip(), "```"]
+        from .workstate import candidate_brief
+        lines += candidate_brief(self, fn, proj)
         notes = self.store.all(
             "SELECT n.text, n.created_at, a.name FROM notes n LEFT JOIN agents a ON a.id=n.agent_id "
             "WHERE n.function_id=? ORDER BY n.id DESC LIMIT 8", fn["id"])
@@ -424,6 +429,24 @@ class Network:
 
     def compile_and_diff(self, agent: Agent, function: str, source: str, project: str | None = None) -> str:
         return self.attempt(agent, function, source, project)["text"]
+
+    def replace_matched_source(self, agent: Agent, function: str, source: str, project: str | None = None) -> dict:
+        """Save a checked correction to matched C without changing its credit or reopening the function.
+
+        Harvest Moon's exported C corrected a data address declared as a function; keeping that correction only in
+        the export lost it on the next export. A scratch attempt must still match before its source can replace it.
+        """
+        fn = self._function(function, project)
+        if fn["status"] != "matched":
+            raise NetworkError("only a matched function's source can be replaced; submit an attempt instead")
+        result = self.attempt(agent, function, source, project)
+        if result["score"] != 0:
+            raise NetworkError("the replacement source must still match the game")
+        with self.store.tx() as db:
+            db.execute("UPDATE functions SET matched_source=?, best_source=? WHERE id=? AND status='matched'",
+                       (source, source, fn["id"]))
+            self._event(db, fn["project_id"], agent.id, "source", f"{fn['name']}: corrected matched source")
+        return {"score": 0, "matched": True, "text": "Saved corrected source; it still matches the game."}
 
     def attempt(self, agent: Agent, function: str, source: str, project: str | None = None) -> dict:
         """Compile, score and record one attempt. Returns {"text", "score", "matched"} (score None: didn't compile)."""
@@ -457,6 +480,7 @@ class Network:
                             f"would fail the same way (not compiled again). Change what the compiler complained about"
                             f"{compile_hints(source, '')}.{self.stall_note(fn['id'], agent.id)}", "score": None, "matched": False}
 
+        self.check_retry(fn, proj)
         ctx = self._context(proj["id"], fn["unit"])
         result = self._compile(proj, ctx["header"], source, fn)
 
@@ -495,6 +519,18 @@ class Network:
         if problems:
             warn += "\nwhen linking your code at the function's address:\n" + "\n".join(f"- {p}" for p in problems)
         return {"text": f"{head}\n{d.render()}{warn}{self.stall_note(fn['id'], agent.id)}", "score": d.score, "matched": False}
+
+    def plan_attempt(self, agent, project, function, hypothesis):
+        from .workstate import plan_attempt
+        return plan_attempt(self, agent, project, function, hypothesis)
+
+    def preserve_candidate(self, agent, project, function, source, evidence, verdict="reviewed"):
+        from .workstate import preserve_candidate
+        return preserve_candidate(self, agent, project, function, source, evidence, verdict)
+
+    def check_retry(self, fn, proj):
+        from .workstate import check_retry
+        check_retry(self, fn, proj)
 
     def stall_note(self, function_id: int, agent_id: int, after: int | None = None) -> str:
         """A nudge once an agent's last `after` compiles of a function didn't beat its best: functions that match
@@ -698,7 +734,7 @@ class Network:
         proj = self._project(slug)
         with self.store.tx() as db:
             ids = [r["id"] for r in db.execute("SELECT id FROM functions WHERE project_id=?", (proj["id"],))]
-            for table in ("claims", "attempts"):
+            for table in ("claims", "attempts", "retry_plans", "candidate_checks", "permuter_runs", "permuter_trials"):
                 db.executemany(f"DELETE FROM {table} WHERE function_id=?", [(i,) for i in ids])
             for table in ("notes", "events", "context_versions", "functions", "symbols", "twin_misses"):
                 db.execute(f"DELETE FROM {table} WHERE project_id=?", (proj["id"],))

@@ -7,6 +7,19 @@ from decompnet.rom import gba_candidates, listing
 BASE = 0x08000000
 
 
+def test_literal_references_across_raw_runs_keep_the_pool_as_data():
+    data = (bytes.fromhex("8746 0000") + struct.pack("<I", BASE + 8)
+            + bytes.fromhex("0148 7047") + struct.pack("<I", BASE + 0x14)
+            + struct.pack("<I", 0x20012002) + bytes.fromhex("0321 7047"))
+    text = ("\tmov pc, r0\n\t.byte 0x00, 0x00\n_08000004: .4byte 0x08000008\n"
+            "\t.byte 0x01, 0x48, 0x70, 0x47\n_0800000C: .4byte 0x08000014\n"
+            "\t.byte 0x02, 0x20, 0x01, 0x20, 0x03, 0x21, 0x70, 0x47")
+    repaired = listing.repair(text, BASE, data)
+    assert "ldr r0, _08000010" in repaired
+    assert "_08000010: .4byte 0x20012002" in repaired
+    assert "movs r0, #2" not in repaired
+
+
 def _rom(words, tail):
     return b"\x87\x46\x00\x00" + b"".join(struct.pack("<I", w) for w in words) + tail
 

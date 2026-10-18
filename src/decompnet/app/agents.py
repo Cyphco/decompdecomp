@@ -711,7 +711,7 @@ class Manager:
                 self.sessions[sid] = s
                 threading.Thread(target=self._run, args=(s,), daemon=True, name=f"agent-{sid}").start()
                 ids.append(sid)
-        self.persist(self.running())
+            self.persist(self.running())
         return ids
 
     def _prepare(self, slug: str) -> None:
@@ -755,20 +755,21 @@ class Manager:
 
     def stop(self, sid: str | None = None) -> None:
         """Stop one helper (for good) or all of them (the app is quitting: they resume next time)."""
-        if sid is None:  # what resumes is what was working now, whatever was saved before (king.exe's lost its helpers)
-            self.persist(self.running())
-        for s in list(self.sessions.values()):
-            if sid in (None, s.id):
-                s.stop.set()
-                if s.proc and s.proc.poll() is None:
-                    _terminate(s.proc)
-                if s.state not in ("error",):
-                    s.state = "stopped"
-                if sid is not None:  # its function is free now, not when its thread notices (an API helper waits on
-                    with self.net.store.tx() as db:  # its model meanwhile, and showed up as a "connected agent")
-                        db.execute("DELETE FROM claims WHERE agent_id=(SELECT id FROM agents WHERE name=?)", (s.agent_name,))
-        if sid is not None:
-            self.persist(self.running())
+        with self._lock:
+            if sid is None:  # what resumes is what was working now, whatever was saved before
+                self.persist(self.running())
+            for s in list(self.sessions.values()):
+                if sid in (None, s.id):
+                    s.stop.set()
+                    if s.proc and s.proc.poll() is None:
+                        _terminate(s.proc)
+                    if s.state not in ("error",):
+                        s.state = "stopped"
+                    if sid is not None:  # free the claim now, rather than waiting for an API model to return
+                        with self.net.store.tx() as db:
+                            db.execute("DELETE FROM claims WHERE agent_id=(SELECT id FROM agents WHERE name=?)", (s.agent_name,))
+            if sid is not None:
+                self.persist(self.running())
 
     def remove(self, sid: str) -> None:
         self.stop(sid)
@@ -949,11 +950,12 @@ class Manager:
                 break
             s.state = "waiting"
             s.stop.wait(3 if ok else min(60, 5 * failures + max(0, 10 - (time.time() - t0))))
-        if s.state != "error":
-            s.state = "stopped"
-        if not s.stop.is_set():  # finished by itself (done, budget, errors): no need to resume it
-            s.stop.set()
-            self.persist(self.running())
+        with self._lock:
+            if s.state != "error":
+                s.state = "stopped"
+            if not s.stop.is_set():  # finished by itself (done, budget, errors): no need to resume it
+                s.stop.set()
+                self.persist(self.running())
         held = self.net.store.one("SELECT f.name FROM claims c JOIN functions f ON f.id=c.function_id WHERE c.agent_id=?", agent.id)
         link = self.net.links.get(s.slug)
         if held and link is not None:  # in a room, the host holds the real claim
@@ -1360,6 +1362,11 @@ def api_tool_schemas(fork: bool = False) -> list[dict]:
                          "the judge's survey of other compilers in the background; check_ranges=true looks at the "
                          "applied ranges again.", s(survey=bo("start the survey"), check_ranges=bo("check applied ranges"))),
         "list_functions": ("List functions by status.", s(status=st("open | matched | all"), limit=it("max rows"))),
+        "plan_attempt": ("Plan a bounded retry with a new hypothesis and supporting evidence.",
+                         s(function=st("function", True), hypothesis=st("new hypothesis and evidence", True))),
+        "preserve_candidate": ("Preserve behavior evidence separately from byte similarity; not a match.",
+                               s(function=st("function", True), source=st("complete source", True),
+                                 evidence=st("checks and limitations", True), verdict=st("reviewed, tested, or rejected"))),
         "add_note": ("Leave a note for other agents.", s(text=st("note", True), function=st("function"))),
         "suggest": ("Suggest a setup change for the user (another compiler or flags), with evidence.",
                     s(text=st("what and why", True), compiler=st("toolchain id"), flags=st("flags"),
