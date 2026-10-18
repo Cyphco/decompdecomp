@@ -199,3 +199,27 @@ def test_extent_repair_candidates_and_row_update(tmp_path):
     assert (row["size"], row["n_insns"], row["n"]) == (32, 16, 32) and json.loads(row["relocs"]) == [[4, 2, 0x03000000]]
     assert n.store.one("SELECT size FROM symbols WHERE name='f'")["size"] == 32
     assert n.store.one("SELECT detail FROM events WHERE kind='boundary'")["detail"].startswith("f: 22 -> 32")
+
+
+def test_a_function_can_be_set_aside_as_assembly(tmp_path):
+    import pytest
+
+    from decompnet.app.engine import RomNetwork
+    from decompnet.network import NetworkError
+
+    n = RomNetwork(tmp_path / "t.db", tmp_path)
+    with n.store.tx() as db:
+        db.execute("INSERT INTO projects(id,slug,name,arch,root,config) VALUES(1,'p','P','arm','.',?)",
+                   (json.dumps({"kind": "rom", "platform": "gba"}),))
+        db.execute("INSERT INTO functions(project_id,name,vram,n_insns,rom_offset) VALUES(1,'driver',4096,5,0)")
+        db.execute("INSERT INTO functions(project_id,name,vram,n_insns,status) VALUES(1,'done',8192,5,'matched')")
+    a = n.authenticate(n.register_agent("a", "a"))
+    n.claim_row(a, "p", "driver")
+    assert "assembly now" in n.mark_assembly("p", "driver", "keeps lr in ip across a call")
+    row = n.store.one("SELECT status, meta FROM functions WHERE name='driver'")
+    assert row["status"] == "asm" and "keeps lr in ip" in row["meta"]
+    assert n.store.one("SELECT COUNT(*) AS n FROM claims")["n"] == 0  # a helper holding it lets go
+    with pytest.raises(NetworkError, match="is C"):
+        n.mark_assembly("p", "done", "x")
+    with pytest.raises(NetworkError, match="why"):
+        n.mark_assembly("p", "driver", "  ")

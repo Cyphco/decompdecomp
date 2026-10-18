@@ -139,6 +139,11 @@ def register(app: App) -> None:
             return net.start_extent_repair(slug, apply=data.get("apply", True) is not False)
         return net.__dict__.get("extent_jobs", {}).get(slug) or {"state": "idle"}
 
+    def p_assembly(slug, request, data):
+        """Set functions aside as hand-written assembly: {"names": [...], "reason": "..."}."""
+        reason = str(data.get("reason", ""))
+        return {"done": [net.mark_assembly(slug, str(n), reason) for n in (data.get("names") or [])]}
+
     def p_note(slug, request, data):
         """A note from you on a function (or the whole project): agents read notes when they claim it."""
         agent, _ = net.local_agent("you")
@@ -173,7 +178,7 @@ def register(app: App) -> None:
         "/api/try": (p_try, ["POST"]), "/api/release": (p_release, ["POST"]),
         "/api/autopilot": (p_autopilot, ["POST"]), "/api/instructions": (p_instructions, ["POST"]), "/api/title": (p_title, ["POST"]),
         "/api/priority": (p_priority, ["POST"]), "/api/note": (p_note, ["POST"]),
-        "/api/extents": (p_extents, ["GET", "POST"]), "/api/suggestion": (p_suggestion, ["POST"]), "/api/boundary": (p_boundary, ["POST"]),
+        "/api/extents": (p_extents, ["GET", "POST"]), "/api/assembly": (p_assembly, ["POST"]), "/api/suggestion": (p_suggestion, ["POST"]), "/api/boundary": (p_boundary, ["POST"]),
         "/api/stats": (lambda s, r, d: net.stats(s), ["GET"]),
         "/api/compilermap": (p_compilermap, ["GET", "POST"]),
     }

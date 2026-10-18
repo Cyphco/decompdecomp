@@ -74,6 +74,26 @@ class EditMixin:
         self._xrefs.pop(proj["id"], None)
         return head, tail
 
+    def mark_assembly(self, slug: str, function: str, reason: str) -> str:
+        """A function no compiler can make (a sound driver's register conventions, an interior block of a hand-written
+        routine): it is set aside as assembly, out of the agents' way, with the reason where they and the user can read it."""
+        fn = self._function(function, slug)
+        proj = self._project(slug)
+        if not self.is_rom(proj):
+            raise NetworkError("mark_assembly is for ROM projects")
+        if fn["status"] == "matched":
+            raise NetworkError(f"{fn['name']} is matched: it is C")
+        reason = " ".join(str(reason).split())[:400]
+        if not reason:
+            raise NetworkError("say why it can't be C")
+        meta = json.loads(fn["meta"] or "{}") if "meta" in fn.keys() else {}
+        meta["asm_code"] = reason
+        with self.store.tx() as db:
+            db.execute("UPDATE functions SET status='asm', meta=? WHERE id=? AND status!='matched'", (json.dumps(meta), fn["id"]))
+            db.execute("DELETE FROM claims WHERE function_id=?", (fn["id"],))
+            self._event(db, proj["id"], None, "boundary", f"{fn['name']} set aside as assembly: {reason}")
+        return f"{fn['name']} is assembly now: {reason}"
+
     def request_boundary(self, agent: Agent, slug: str, function: str, end: str, reason: str) -> str:
         """An agent's report that a function really ends earlier: what follows is alignment padding, linker leftovers
         or data, not code anyone wrote. Changing the function list is the user's call, so it waits for them on the
