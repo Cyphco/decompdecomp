@@ -315,6 +315,6 @@ def test_a_function_never_grows_over_another_functions_prologue(tmp_path):
 
     n, base, rom = _gba_net(tmp_path)
     with n.store.tx() as db:
-        db.execute("DELETE FROM functions WHERE name IN ('B','C')")
+        db.execute("DELETE FROM functions WHERE name IN ('B','C','D')")  # nothing in the way but the bytes
     with pytest.raises(NetworkError, match="starts another function"):
         n.set_bounds("p", "A", end=base + 0x16)  # 0x12 holds push {r4-r6,lr}
