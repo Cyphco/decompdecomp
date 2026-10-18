@@ -306,3 +306,15 @@ def test_the_doctor_finds_a_function_cut_before_its_own_literal(tmp_path):
     assert (a["end"], a["absorb"]) == (base + 8, ["B"]) and "literal" in a["why"]
     done = n.apply_doctor("p", [a])
     assert not done[0].get("error") and n.store.one("SELECT size FROM functions WHERE name='A'")["size"] == 8
+
+
+def test_a_function_never_grows_over_another_functions_prologue(tmp_path):
+    import pytest
+
+    from decompnet.network import NetworkError
+
+    n, base, rom = _gba_net(tmp_path)
+    with n.store.tx() as db:
+        db.execute("DELETE FROM functions WHERE name IN ('B','C')")
+    with pytest.raises(NetworkError, match="starts another function"):
+        n.set_bounds("p", "A", end=base + 0x16)  # 0x12 holds push {r4-r6,lr}

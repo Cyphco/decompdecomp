@@ -17,11 +17,23 @@ from elftools.elf.elffile import ELFFile
 
 from ...elfobj import _function_symbols
 from ...network import NetworkError
-from ...rom import gba, gba_candidates, match_arm
+from ...rom import gba, gba_candidates, listing, match_arm
 
 MAX_FUNCTION = 0x8000  # bytes: a function larger than this is not a function
 GAP_SCAN = 0x1000  # bytes of unowned code followed past a branch target, at most
 SMALL_JUNK = 6  # bytes: a "function" this small with no prologue and no return is a halfword of padding or a literal
+
+
+def _listing(name: str, data: bytes, vram: int, label) -> str:
+    """The assembly agents read for a function whose bytes changed: decoded from them (labels for every branch target,
+    literal-pool words, calls by name), as the split's listing would show it."""
+    md = listing._capstone()
+    if md is None:
+        return f"\tthumb_func_start {name}\n{name}:\n"
+    targets: set[int] = set()
+    listing._decode(md, data, vram, vram + len(data), targets, label, vram, vram + len(data))  # every label first
+    lines, _bad = listing._decode(md, data, vram, vram + len(data), set(targets), label, vram, vram + len(data))
+    return f"\tthumb_func_start {name}\n{name}:\n" + "\n".join(lines) + "\n"
 
 
 def _thumb(md, code: bytes, vram: int):
@@ -56,7 +68,7 @@ def _flow(md, rom: bytes, vram: int, size: int) -> tuple[set[int], set[int], boo
 
 class BoundsMixin:
     def set_bounds(self, slug: str, name: str, start: int | None = None, end: int | None = None,
-                   absorb: list[str] | None = None, reason: str = "") -> dict:
+                   absorb: list[str] | None = None, reason: str = "", allow_prologue: bool = False) -> dict:
         """Set where `name` starts and ends (None: as it is). The rows that lie inside the new range have to be named in
         `absorb` (set aside as assembly, "part of `name`"); the function's bytes, refs, size and symbol follow the ROM.
         Then the function's own C is tried against the new range: a match is recorded. Returns what happened."""
@@ -91,6 +103,16 @@ class BoundsMixin:
         data = rom[new_start - gba.BASE:new_end - gba.BASE]
         if len(data) != size:
             raise NetworkError("that range is outside the ROM")
+        old_end = fn["vram"] + fn["size"]
+        if new_end > old_end and not allow_prologue:  # growing: never over the start of another function
+            import capstone
+
+            md = capstone.Cs(capstone.CS_ARCH_ARM, capstone.CS_MODE_THUMB)
+            push = next((a for a, mn, ops, _ in _thumb(md, rom[old_end - gba.BASE:new_end - gba.BASE], old_end)
+                         if mn == "push" and "lr" in ops), None)
+            if push is not None:
+                raise NetworkError(f"0x{push:08X} starts another function (a push with lr): {fn['name']} can't take it in "
+                                   "(allow_prologue=True if it really is this function's)")
         starts = sorted(r["vram"] for r in self.store.all("SELECT vram FROM functions WHERE project_id=?", proj["id"]))
         refs = gba._refs(data, new_start, gba_candidates.literal_words(rom, starts), new_start - gba.BASE)
         was = (fn["vram"], fn["size"])
@@ -101,10 +123,11 @@ class BoundsMixin:
                 meta["asm_code"] = f"part of {fn['name']} (merged into it){note}"
                 db.execute("UPDATE functions SET status='asm', meta=? WHERE id=?", (json.dumps(meta), r["id"]))
                 db.execute("DELETE FROM claims WHERE function_id=?", (r["id"],))
-            db.execute("UPDATE functions SET vram=?, rom_offset=?, size=?, n_insns=?, target=?, relocs=?, seed=NULL, "
+            db.execute("UPDATE functions SET vram=?, rom_offset=?, size=?, n_insns=?, target=?, relocs=?, asm=?, seed=NULL, "
                        "best_score=NULL WHERE id=?",
                        (new_start, new_start - gba.BASE, size, max(1, size // 2), data,
-                        json.dumps([list(x) for x in refs or []]), fn["id"]))
+                        json.dumps([list(x) for x in refs or []]),
+                        _listing(fn["name"], data, new_start, self.symbols(proj["id"]).label), fn["id"]))
             db.execute("UPDATE symbols SET address=?, size=? WHERE project_id=? AND name=?",
                        (new_start, size, proj["id"], fn["name"]))
             self._event(db, proj["id"], None, "boundary",
