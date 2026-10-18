@@ -20,6 +20,7 @@ from ...network import NetworkError
 from ...rom import gba, gba_candidates, match_arm
 
 MAX_FUNCTION = 0x8000  # bytes: a function larger than this is not a function
+GAP_SCAN = 0x1000  # bytes of unowned code followed past a branch target, at most
 SMALL_JUNK = 6  # bytes: a "function" this small with no prologue and no return is a halfword of padding or a literal
 
 
@@ -178,20 +179,35 @@ class BoundsMixin:
                 j = bisect.bisect_left(starts, end)
                 nxt = rows[j] if j < len(rows) else None
                 limit = nxt["vram"] if nxt is not None else len(rom) + gba.BASE
-                if reach <= limit:  # into bytes no row owns (the split left them as data): they are this function's,
-                    # up to the next prologue after what it reaches (a function the split never found starts there)
-                    stop = next((a for a, mn, ops, _ in _thumb(md, rom[reach - gba.BASE:limit - gba.BASE], reach)
-                                 if mn == "push" and "lr" in ops), limit)
+                if reach <= limit:  # into bytes no row owns (the split left them as data): they are this function's.
+                    # A literal: up to its end. A branch target: through the code there, up to its return (the pool
+                    # after it is picked up next round), never past a prologue (a function the split never found) and
+                    # never further than GAP_SCAN (the bytes after the last function can be megabytes of data)
+                    stop = reach
+                    if reach != lit_need:
+                        stop = None
+                        for a, mn, ops, n in _thumb(md, rom[reach - 2 - gba.BASE:min(limit, reach + GAP_SCAN) - gba.BASE], reach - 2):
+                            if mn == "push" and "lr" in ops and a > reach - 2:
+                                stop = a
+                                break
+                            if mn == "bx" or (mn == "pop" and "pc" in ops):
+                                stop = a + n
+                                break
+                        if stop is None:
+                            break
                     added_lo, end = end, stop
                     why.append(f"its {'literal' if reach == lit_need else 'branches reach'} 0x{reach - (4 if reach == lit_need else 2):08X}, "
                                f"in unowned bytes up to 0x{end:08X}")
                 else:  # a row is in the way: only a fragment with no prologue, not matched, is taken in
                     n_lit, n_targets, n_prologue = info[nxt["name"]]
-                    if nxt["status"] != "open" or n_prologue or nxt["name"] in taken:
+                    if nxt["status"] != "open" or n_prologue or nxt["name"] in taken or nxt["name"] in absorb:
                         break
                     added_lo, end = end, nxt["vram"] + nxt["size"]
                     absorb.append(nxt["name"])
                     why.append(f"its {'literal' if reach == lit_need else 'branches'} reach into {nxt['name']}")
+                if end <= added_lo:  # nothing gained (an empty row): stop here rather than go round again
+                    end = added_lo
+                    break
                 more = _flow(md, rom, added_lo, end - added_lo)
                 literals, targets = literals | more[0], targets | more[1]
             if end != r["vram"] + r["size"] and end - r["vram"] <= MAX_FUNCTION:
