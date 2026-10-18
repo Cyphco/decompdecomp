@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import bisect
 import json
+import struct
 from io import BytesIO
 
 from elftools.elf.elffile import ELFFile
@@ -30,10 +31,41 @@ def _listing(name: str, data: bytes, vram: int, label) -> str:
     md = listing._capstone()
     if md is None:
         return f"\tthumb_func_start {name}\n{name}:\n"
-    targets: set[int] = set()
-    listing._decode(md, data, vram, vram + len(data), targets, label, vram, vram + len(data))  # every label first
-    lines, _bad = listing._decode(md, data, vram, vram + len(data), set(targets), label, vram, vram + len(data))
-    return f"\tthumb_func_start {name}\n{name}:\n" + "\n".join(lines) + "\n"
+    end = vram + len(data)
+    # a switch's jump table is data: decode around it, and its words are labels (the case bodies)
+    tables: list[tuple[int, int]] = []
+    for a, mn, ops, n in _thumb(md, data, vram):
+        if mn == "mov" and ops.startswith("pc,") and not any(lo <= a < hi for lo, hi in tables):
+            # past the literal words after `mov pc` (the table's own address among them) to the first word that
+            # points back into this function: the table runs while they do
+            k = (a + n - vram + 3) & ~3
+            inside = lambda off: off + 4 <= len(data) and vram <= struct.unpack_from("<I", data, off)[0] < end  # noqa: E731
+            while k < min(len(data), a + n - vram + 72) and not inside(k):
+                k += 4
+            if inside(k) and struct.unpack_from("<I", data, k)[0] == vram + k + 4:
+                k += 4  # the pool word holding the table's address, right before it: the ldr's, not the table's
+            first = k
+            while inside(k):
+                k += 4
+            if k > first:
+                tables.append((vram + first, vram + k))
+    targets: set[int] = {struct.unpack_from("<I", data, k - vram)[0] & ~1 for lo, hi in tables for k in range(lo, hi, 4)}
+    segments, at = [], vram
+    for lo, hi in sorted(tables) + [(end, end)]:
+        segments.append((at, lo))
+        at = hi
+    for _ in range(2):  # every label first, then the lines
+        found = set(targets)
+        out: list[str] = []
+        for (lo, hi), table in zip(segments, sorted(tables) + [None]):
+            if hi > lo:
+                lines, _bad = listing._decode(md, data, lo, hi, found, label, vram, end)
+                out += lines
+            if table is not None:
+                for k in range(table[0], table[1], 4):
+                    out.append(f"\t.4byte 0x{struct.unpack_from('<I', data, k - vram)[0]:08X}")
+        targets |= found
+    return f"\tthumb_func_start {name}\n{name}:\n" + "\n".join(out) + "\n"
 
 
 def _thumb(md, code: bytes, vram: int):

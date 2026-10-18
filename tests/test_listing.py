@@ -45,3 +45,13 @@ def test_a_function_with_a_switch_ends_after_its_case_bodies():
     rom = _rom([BASE + 0x10, BASE + 0x14, BASE + 0x18], bodies) + bytes(64)
     (start, end, _), = gba_candidates.bodies(rom, [BASE], set(), switches=True)
     assert (start, end) == (0, 0x1C)  # after the last case body, not at the table
+
+
+def test_a_rewritten_listing_shows_a_jump_table_as_words():
+    from decompnet.app.engine.bounds import _listing
+
+    # mov pc, r0 / pad / two cases at +8 and +0xC: movs r0,#1 ; bx lr / movs r0,#2 ; bx lr
+    code = b"\x87\x46\x00\x00" + struct.pack("<II", BASE + 0xC, BASE + 0x10) + bytes([1, 0x20, 0x70, 0x47, 2, 0x20, 0x70, 0x47])
+    text = _listing("f", code, BASE, lambda a: f"sub_{a:08X}")
+    assert ".4byte 0x0800000C" in text and ".4byte 0x08000010" in text
+    assert "_0800000C:" in text and "_08000010:" in text and "movs r0, #2" in text
