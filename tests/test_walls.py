@@ -177,3 +177,25 @@ def test_the_queue_does_not_hand_back_what_a_helper_just_released(tmp_path):
     assert n.claim_row(a, "p")["name"] == "other"  # the queue is used up for a
     n.release(a, "other", "", "p")
     assert n.claim_row(a, "p") is None  # everything has been given up by a: nothing is handed back
+
+
+def test_extent_repair_candidates_and_row_update(tmp_path):
+    from decompnet.app.engine import RomNetwork
+
+    n = RomNetwork(tmp_path / "t.db", tmp_path)
+    with n.store.tx() as db:
+        db.execute("INSERT INTO projects(id,slug,name,arch,root,config) VALUES(1,'p','P','arm','.',?)", (json.dumps({}),))
+        db.execute("INSERT INTO functions(id,project_id,name,vram,size,n_insns,target,relocs,best_source) "
+                   "VALUES(1,1,'f',4096,22,11,x'00',?, 'best')", (json.dumps([]),))
+        db.execute("INSERT INTO symbols(project_id,name,address,size,kind) VALUES(1,'f',4096,22,'func')")
+        for k, src in enumerate(["best", "a", "a", "b", "bad"]):  # the best one again, a duplicate, and one that failed
+            db.execute("INSERT INTO attempts(function_id,agent_id,score,compiled,source,created_at) VALUES(1,1,10,?,?,?)",
+                       (0 if src == "bad" else 1, src, k))
+    fn = n.store.one("SELECT * FROM functions WHERE id=1")
+    assert n._extent_candidates(fn) == ["best", "b", "a"]  # newest first, no repeats, compiled ones only
+    proj = n.store.one("SELECT * FROM projects WHERE id=1")
+    n._set_extent(proj, fn, 32, b"\x01" * 32, [(4, 2, 0x03000000)])
+    row = n.store.one("SELECT size,n_insns,length(target) AS n,relocs FROM functions WHERE id=1")
+    assert (row["size"], row["n_insns"], row["n"]) == (32, 16, 32) and json.loads(row["relocs"]) == [[4, 2, 0x03000000]]
+    assert n.store.one("SELECT size FROM symbols WHERE name='f'")["size"] == 32
+    assert n.store.one("SELECT detail FROM events WHERE kind='boundary'")["detail"].startswith("f: 22 -> 32")

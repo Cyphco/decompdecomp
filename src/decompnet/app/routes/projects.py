@@ -133,6 +133,12 @@ def register(app: App) -> None:
     def p_priority(slug, request, data):
         return {"priority": net.set_priority(slug, str(data.get("name", "")), bool(data.get("on", True)))}
 
+    def p_extents(slug, request, data):
+        """GBA: check where functions end against the agents' own C (engine/extents.py); POST starts it, GET is its status."""
+        if request.method == "POST":
+            return net.start_extent_repair(slug, apply=data.get("apply", True) is not False)
+        return net.__dict__.get("extent_jobs", {}).get(slug) or {"state": "idle"}
+
     def p_note(slug, request, data):
         """A note from you on a function (or the whole project): agents read notes when they claim it."""
         agent, _ = net.local_agent("you")
@@ -167,7 +173,7 @@ def register(app: App) -> None:
         "/api/try": (p_try, ["POST"]), "/api/release": (p_release, ["POST"]),
         "/api/autopilot": (p_autopilot, ["POST"]), "/api/instructions": (p_instructions, ["POST"]), "/api/title": (p_title, ["POST"]),
         "/api/priority": (p_priority, ["POST"]), "/api/note": (p_note, ["POST"]),
-        "/api/suggestion": (p_suggestion, ["POST"]), "/api/boundary": (p_boundary, ["POST"]),
+        "/api/extents": (p_extents, ["GET", "POST"]), "/api/suggestion": (p_suggestion, ["POST"]), "/api/boundary": (p_boundary, ["POST"]),
         "/api/stats": (lambda s, r, d: net.stats(s), ["GET"]),
         "/api/compilermap": (p_compilermap, ["GET", "POST"]),
     }
