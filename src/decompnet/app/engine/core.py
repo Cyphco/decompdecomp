@@ -34,12 +34,14 @@ class Core(Network):
         self.autopilots: dict[str, dict] = {}  # slug -> progress of trying every function's machine draft
         self._cmaps: dict[int, tuple] = {}  # project id -> (what it was built from, compiler map)
         self.surveys: dict[str, dict] = {}  # slug -> the judge's compiler survey, running or last
+        from ..deep_permute import DeepPermuter
         from ..forkengine import ForkEngine  # forks build on this class's claims, attempts and live view
         from ..permute import Permuter
         from ..twins import Twins
         self.forks = ForkEngine(self)
         self.twins = Twins(self)
         self.permuter = Permuter(self)
+        self.deep_permuter = DeepPermuter(self)
         from ..rangecheck import RangeChecks
         self.rangechecks = RangeChecks(self)
 

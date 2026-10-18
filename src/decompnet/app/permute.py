@@ -13,9 +13,11 @@ byte for byte, like everything else.
 from __future__ import annotations
 
 import logging
+import os
 import random
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 from .. import scoring
@@ -26,6 +28,9 @@ log = logging.getLogger("decompdecomp")
 NEAR = 0.06  # a near miss: at most this much of the function differs (best_score <= 6% of n_insns * 100)
 SECONDS = 60  # per function per turn
 MAX_TURNS = 4  # turns per function before it's left to agents
+# functions permuted at once: each variant is a compile (a process of its own), so threads use the cores; a third of
+# them, leaving the rest to the judge and the agents (one at a time left 23 of 24 cores idle with 150 near misses)
+WORKERS = max(2, (os.cpu_count() or 4) // 3)
 
 
 @dataclass
@@ -65,7 +70,7 @@ class Permuter:
         if (st := self.jobs.get(slug)) is not None:
             st.stop.set()
 
-    def candidates(self, proj, limit: int = 20) -> list:
+    def candidates(self, proj, limit: int = WORKERS * 3) -> list:
         return [r for r in self.net.store.all(
             "SELECT * FROM functions WHERE project_id=? AND status='open' AND best_source IS NOT NULL "
             "AND best_score > 0 AND best_score <= n_insns * 100 * ? AND n_insns <= 400 "
@@ -89,14 +94,18 @@ class Permuter:
                     st.stop.wait(180)
                     continue
                 idle = 0
-                for fn in todo:
+
+                def one(fn, proj=proj) -> None:
                     if st.stop.is_set():
-                        break
+                        return
                     self._turns[fn["id"]] = self._turns.get(fn["id"], 0) + 1
                     try:
                         self._permute(agent, proj, fn, st)
                     except Exception as e:  # one odd function must not stop the rest
                         log.info("permuter: %s: %s", fn["name"], e)
+
+                with ThreadPoolExecutor(max_workers=WORKERS, thread_name_prefix=f"permute-{slug}") as pool:
+                    list(pool.map(one, todo))
         finally:
             st.state = "stopped" if st.stop.is_set() else "done"
             st.current = ""

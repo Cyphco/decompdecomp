@@ -288,3 +288,21 @@ def test_a_suggestion_is_closed_with_a_note(tmp_path):
     n.close_suggestion("p", 1, "applied", "A now ends at 0x08000008")
     row = n._suggestion_log(n.cfg(n._project("p")))[0]  # what the Suggestions tab lists
     assert row["status"] == "applied" and row["resolution"] == "A now ends at 0x08000008"
+
+
+def test_numbers_are_substituted_in_their_own_base():
+    from decompnet.app.engine.adapt import _replace_number
+
+    src = "f.v.a=0x28; x = 40; D_080E5D50[0x28]; y = 0x280;"
+    assert _replace_number(src, 0x28, 0x1B) == "f.v.a=0x1b; x = 27; D_080E5D50[0x1b]; y = 0x280;"
+    assert _replace_number(src, 0x28, 0x1B, which=1) == "f.v.a=0x28; x = 27; D_080E5D50[0x28]; y = 0x280;"
+    assert _replace_number(src, 7, 8) is None  # nothing worth 7 (and the 080E5D50 in a name is not a number)
+
+
+def test_the_doctor_finds_a_function_cut_before_its_own_literal(tmp_path):
+    n, base, rom = _gba_net(tmp_path)
+    props = n.doctor_bounds("p")
+    a = next(p for p in props if p["function"] == "A")
+    assert (a["end"], a["absorb"]) == (base + 8, ["B"]) and "literal" in a["why"]
+    done = n.apply_doctor("p", [a])
+    assert not done[0].get("error") and n.store.one("SELECT size FROM functions WHERE name='A'")["size"] == 8

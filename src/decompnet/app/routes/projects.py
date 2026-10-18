@@ -151,6 +151,33 @@ def register(app: App) -> None:
         return net.set_bounds(slug, str(data.get("name", "")), addr(data.get("start")), addr(data.get("end")),
                               [str(n) for n in data.get("absorb") or []], str(data.get("reason", "")))
 
+    def p_permuter(slug, request, data):
+        """The near-miss permuter: POST {"action": "start"|"stop"}, GET its status."""
+        if request.method == "POST":
+            (net.permuter.stop if data.get("action") == "stop" else net.permuter.start)(slug)
+        return net.permuter.status(slug) or {"state": "idle"}
+
+    def p_deep(slug, request, data):
+        """decomp-permuter on the near misses (deep_permute.py): POST {"action": "start"|"stop", "minutes", "jobs"}."""
+        if request.method == "POST":
+            if data.get("action") == "stop":
+                net.deep_permuter.stop(slug)
+            else:
+                return net.deep_permuter.start(slug, float(data.get("minutes") or 4), int(data.get("jobs") or 0))
+        return net.deep_permuter.status(slug) or {"state": "idle"}
+
+    def p_adapt(slug, request, data):
+        """Match functions from their matched twins (engine/adapt.py): POST starts it, GET is its status."""
+        if request.method == "POST":
+            return net.start_adapt_twins(slug)
+        return net.__dict__.get("adapt_jobs", {}).get(slug) or {"state": "idle"}
+
+    def p_doctor(slug, request, data):
+        """Misbounded GBA functions (engine/bounds.py): GET lists them, POST fixes them."""
+        if request.method == "POST":
+            return {"done": net.apply_doctor(slug)}
+        return {"proposals": net.doctor_bounds(slug)}
+
     def p_note(slug, request, data):
         """A note from you on a function (or the whole project): agents read notes when they claim it."""
         agent, _ = net.local_agent("you")
@@ -185,7 +212,10 @@ def register(app: App) -> None:
         "/api/try": (p_try, ["POST"]), "/api/release": (p_release, ["POST"]),
         "/api/autopilot": (p_autopilot, ["POST"]), "/api/instructions": (p_instructions, ["POST"]), "/api/title": (p_title, ["POST"]),
         "/api/priority": (p_priority, ["POST"]), "/api/note": (p_note, ["POST"]),
-        "/api/extents": (p_extents, ["GET", "POST"]), "/api/assembly": (p_assembly, ["POST"]), "/api/bounds": (p_bounds, ["POST"]), "/api/suggestion": (p_suggestion, ["POST"]), "/api/boundary": (p_boundary, ["POST"]),
+        "/api/extents": (p_extents, ["GET", "POST"]), "/api/assembly": (p_assembly, ["POST"]), "/api/bounds": (p_bounds, ["POST"]),
+        "/api/permuter": (p_permuter, ["GET", "POST"]), "/api/adapt": (p_adapt, ["GET", "POST"]),
+        "/api/doctor": (p_doctor, ["GET", "POST"]), "/api/deep-permuter": (p_deep, ["GET", "POST"]),
+        "/api/suggestion": (p_suggestion, ["POST"]), "/api/boundary": (p_boundary, ["POST"]),
         "/api/stats": (lambda s, r, d: net.stats(s), ["GET"]),
         "/api/compilermap": (p_compilermap, ["GET", "POST"]),
     }

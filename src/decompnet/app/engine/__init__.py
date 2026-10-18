@@ -19,6 +19,7 @@ The engine is one class, RomNetwork, put together from a module per topic:
 - editing.py: changing the project (names, the header, notes, splits, function ends)
 - extents.py: where GBA functions end, settled by the agents' own C
 - bounds.py: setting where a GBA function starts and ends, merging fragments into it
+- adapt.py: matching a function from its matched twin (other constants, data, callees)
 - rooms.py: rooms (collab.py), the engine's side
 - gui.py: what the GUI shows, and the export
 - autopilot.py: autopilot, and what a match sets off
@@ -26,6 +27,7 @@ The engine is one class, RomNetwork, put together from a module per topic:
 
 from __future__ import annotations
 
+from .adapt import AdaptMixin
 from .autopilot import AutopilotMixin
 from .bounds import BoundsMixin
 from .briefs import BriefMixin
@@ -42,6 +44,6 @@ from .rooms import RoomMixin
 __all__ = ["RomNetwork", "COMPILERS", "MW_VERSIONS", "PLATFORM_STATUS", "SHORT_NAMES", "TOOLS", "parse_ranges"]
 
 
-class RomNetwork(ImportMixin, JudgeMixin, BriefMixin, CompilerMixin, EditMixin, ExtentMixin, BoundsMixin, RoomMixin,
+class RomNetwork(ImportMixin, JudgeMixin, BriefMixin, CompilerMixin, EditMixin, ExtentMixin, BoundsMixin, AdaptMixin, RoomMixin,
                  GuiMixin, AutopilotMixin, Core):
     """A ROM project engine: Network's claims, attempts and notes, for games split from their ROM (see above)."""
