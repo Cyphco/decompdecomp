@@ -171,7 +171,7 @@ def assembly_input(piece: dict) -> str:
     """Keep external literal pools addressable when a handwritten routine spans several pieces.
 
     Thumb literal loads have no relocation for another object's label. Define those pool addresses relative to
-    this piece's text section before including the untouched reference assembly (Harvest Moon's decompressor).
+    this piece's text section before including the untouched reference assembly (a GBA game's decompressor).
     """
     text = (ROOT / piece["src"]).read_text(encoding="utf-8")
     own = set(re.findall(r"^(_[0-9A-F]{8}):", text, re.M))

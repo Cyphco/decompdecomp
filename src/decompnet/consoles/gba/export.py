@@ -102,7 +102,7 @@ def standalone_source(source: str, name: str) -> str:
         if other != name and not re.search(r"\bstatic\b|\btemplate\b|::", source[start:body]):
             source = source[:start] + source[start:body].rstrip() + ";" + source[end:]
     # Automatic data names denote existing ROM/RAM addresses. A tentative definition would allocate a new COMMON
-    # object instead (Harvest Moon's u8 D_080FA7E2[]), although the single-function judge resolves the original name.
+    # object instead (a GBA game's u8 D_080FA7E2[]), although the single-function judge resolves the original name.
     bodies = [(body, end) for _, _, body, end in _definitions(source)]
     declarations = re.finditer(r"(?m)^([ \t]*)(?!extern\b|static\b|typedef\b)"
                               r"([\w \t*]+?\b(?:D|B|RO|STR|FLT|DBL|jtbl)_[0-9A-F]{8}\s*(?:\[[^\]\n]*\]\s*)*);",

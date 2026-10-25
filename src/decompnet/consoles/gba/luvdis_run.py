@@ -30,7 +30,7 @@ def main() -> int:
     module = importlib.util.module_from_spec(spec)
     sys.modules["luvdis.analyze"] = module
     exec(compile(source.replace(PUSH, SAFE_PUSH, 1), spec.origin, "exec"), module.__dict__)
-    # Harvest Moon: a repaired start can retain sub_<old address> as its name. If luvdis also finds the old
+    # A GBA game: a repaired start can retain sub_<old address> as its name. If luvdis also finds the old
     # address, its default name would define that same symbol twice. Reserve the provided names first.
     label_for = module.State.label_for
 

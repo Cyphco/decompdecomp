@@ -37,7 +37,7 @@ def plausible_function(rom: bytes, off: int, limit: int = 0x800) -> bool:
             return True
         pos += ins.size
         if ins.mnemonic == "mov" and ins.op_str.startswith("pc,"):
-            # Harvest Moon's native script callback is 23 KiB, with its switch table before any return.
+            # a GBA game's native script callback is 23 KiB, with its switch table before any return.
             # Keep the ordinary short scan, but follow proven case addresses instead of decoding the table.
             first = next(md.disasm(rom[off:off + 2], BASE + off, 1), None)
             if first and first.mnemonic == "push" and "lr" in first.op_str and _switch_returns(rom, pos, off):
