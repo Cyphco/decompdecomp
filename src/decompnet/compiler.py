@@ -197,12 +197,16 @@ def compile_source(cfg: CompilerConfig, context_header: str, source: str, truste
         # still compiles exactly as it did (GTA San Andreas is C++; 1,222 of its functions matched as C)
         if not result.ok and cfg.cplusplus and not result.log.startswith("compiler timed out"):
             cpp = _compile_as(cfg, work, root, source, "cpp")
-            if cpp.ok or _CPP.search(source):
+            # A C attempt that said nothing has no error worth showing: agbcp refuses C with a bare exit 1, so an
+            # `extern "C"` function with a C++ mistake answered "compiler exited with 1" and agents gave up on it
+            if cpp.ok or _CPP.search(source) or _SILENT.fullmatch(result.log):
                 return cpp
         return result
 
 
-_CPP = re.compile(r"::|\bclass\b|\btemplate\b|\bnew\b|\bdelete\b|\bvirtual\b|\boperator\b|\bnamespace\b|\bthis\b")
+_CPP = re.compile(r'::|\bclass\b|\btemplate\b|\bnew\b|\bdelete\b|\bvirtual\b|\boperator\b|\bnamespace\b|\bthis\b'
+                  r'|\bextern\s*"C(?:\+\+)?"')
+_SILENT = re.compile(r"compiler exited with -?\d+")  # (_compile_as, when the compiler printed nothing)
 
 
 def _compile_as(cfg: CompilerConfig, work: Path, root: str, source: str, ext: str) -> CompileResult:
