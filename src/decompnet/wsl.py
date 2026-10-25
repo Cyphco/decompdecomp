@@ -136,17 +136,25 @@ def stage_dir() -> str:
     return f"/tmp/decompnet-{secrets.token_hex(8)}"
 
 
-def prepare_tools(directories: tuple[Path, ...]) -> tuple[str, ...]:
+TOOL_COPY_SECONDS = 900  # the first copy of a toolchain into WSL: through the Windows drive, file by file
+
+
+def prepare_tools(directories: tuple[Path, ...], skip: dict[str, list[str]] | None = None) -> tuple[str, ...]:
     """Keep a Linux-side copy of the pinned compiler and its dependencies, keyed by their install manifests.
 
     EE-GCC's 32-bit access() cannot find its compiler passes on a Windows drive, even when the source is staged
     in Linux. Copying the toolchain too fixes that. The complete tree is published by rename, so parallel starts
     never see half a compiler; a fresh install gets a fresh cache without modifying another app's copy.
+    `skip`: folders of a toolchain (by its folder's name) a compile never reads, left out of the copy: agbcc needs
+    the Arm GNU Toolchain's preprocessor and assembler, not the 600 MB of C libraries beside them.
     """
+    skip = skip or {}
     digest = hashlib.sha256(b"tool-cache-v1")
     for directory in directories:
         digest.update(str(directory.resolve()).encode("utf-8"))
         digest.update((directory / ".decompnet-toolchain.json").read_bytes())
+        if skip.get(directory.name):
+            digest.update(repr(sorted(skip[directory.name])).encode("utf-8"))
     cache = f"{_cache_directory()}/{digest.hexdigest()[:24]}"
     result = tuple(f"{cache}/{directory.name}" for directory in directories)
     q = shlex.quote
@@ -156,11 +164,19 @@ def prepare_tools(directories: tuple[Path, ...]) -> tuple[str, ...]:
         lines = [f"mkdir -p {q(_cache_directory())} || exit 1", f"if [ ! -f {q(cache + '/.ready')} ]; then",
                  f"  stage=$(mktemp -d {q(cache + '.XXXXXX')}) || exit 1",
                  "  trap 'rm -rf \"$stage\"' EXIT"]
-        lines += [f'  cp -R {q(path(directory))} "$stage"/{q(directory.name)} || exit 1' for directory in directories]
+        for directory in directories:
+            left_out = skip.get(directory.name) or []
+            if not left_out:
+                lines.append(f'  cp -R {q(path(directory))} "$stage"/{q(directory.name)} || exit 1')
+                continue
+            excludes = " ".join(f"--exclude={q('./' + p.strip('/'))}" for p in left_out)
+            lines += [f'  mkdir -p "$stage"/{q(directory.name)} || exit 1',
+                      f'  tar -C {q(path(directory))} {excludes} -cf - . | tar -C "$stage"/{q(directory.name)} -xf - '
+                      "|| exit 1"]
         lines += ['  touch "$stage/.ready" || exit 1',
                   f'  mv -T "$stage" {q(cache)} 2>/dev/null || [ -f {q(cache + "/.ready")} ] || exit 1', "fi"]
         with tempfile.TemporaryDirectory(prefix="decomp-wsl-tools-") as work:
-            copied = run(["sh", "-c", "\n".join(lines)], Path(work), 120)
+            copied = run(["sh", "-c", "\n".join(lines)], Path(work), TOOL_COPY_SECONDS)
         if copied.returncode:
             raise OSError(f"WSL couldn't copy the compiler to its Linux filesystem: {copied.stderr[-400:]}")
         _prepared_tools.add(cache)

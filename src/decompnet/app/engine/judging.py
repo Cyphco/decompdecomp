@@ -29,12 +29,15 @@ class JudgeMixin:
     def _target_obj(self, fn, proj):
         if not self.is_rom(proj):
             return super()._target_obj(fn, proj)
-        return match.canonical_target(self._rom_target(fn), self.symbols(proj["id"]))
+        own = self.console(proj).rom_target_obj(fn)  # a console with a judge of its own (the GBA's)
+        return own if own is not None else match.canonical_target(self._rom_target(fn), self.symbols(proj["id"]))
 
     def _evaluate(self, fn, proj, obj: bytes):
         if not self.is_rom(proj):
             return super()._evaluate(fn, proj, obj)
-        res = match.link(obj, fn["name"], self._rom_target(fn), self.symbols(proj["id"]), self.reader(proj))
+        res = self.console(proj).rom_link(obj, fn, self.symbols(proj["id"]), self.reader(proj))
+        if res is None:
+            res = match.link(obj, fn["name"], self._rom_target(fn), self.symbols(proj["id"]), self.reader(proj))
         return res.candidate, res.exact if res.candidate is not None else None, res.problems
 
     def rename_tokens(self, proj, text: str) -> str:

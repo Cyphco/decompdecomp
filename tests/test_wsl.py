@@ -64,6 +64,49 @@ def test_a_failed_linux_copy_is_not_cached(tool_cache, monkeypatch):
     assert len(calls) == 2 and not wsl._prepared_tools
 
 
+def test_a_toolchains_skipped_folders_stay_out_of_its_linux_copy(tool_cache):
+    """agbcc needs the Arm toolchain's preprocessor and assembler in WSL, not its 600 MB of C libraries: copying all
+    of it through the Windows drive took longer than the copy may (the first compile failed)."""
+    directories, calls = tool_cache
+    whole = wsl.prepare_tools(directories)
+    skipped = wsl.prepare_tools(directories, {directories[0].name: ["arm-none-eabi/lib", "share/"]})
+    assert skipped != whole and len(calls) == 2  # a copy without them is another cache
+    script = calls[1][-1]
+    assert f"cp -R {shlex.quote(str(directories[0]))}" not in script
+    assert "--exclude=./arm-none-eabi/lib" in script and "--exclude=./share " in script
+    assert f"cp -R {shlex.quote(str(directories[1]))}" in script  # the others are copied whole, as before
+
+
+def test_a_compiler_range_can_pick_another_binary_of_its_toolchain(monkeypatch, tmp_path):
+    """Some GBA library code was built with agbcc's older snapshot, old_agbcc, in the same archive: a range keeps
+    that choice (its "variant"), and the project's own compiler doesn't inherit it."""
+    from decompnet.project import compiler_for
+
+    monkeypatch.setattr(toolchains.sys, "platform", "linux")
+    monkeypatch.delenv("DECOMP_WSL", raising=False)
+    monkeypatch.setattr(toolchains, "runtime_dirs", lambda tid: (tmp_path / tid, tmp_path / "arm-gnu"))
+    cfg = {"compiler": {"toolchain": "agbcc", "flags": ["-O2"], "variant": "old_agbcc"},
+           "compiler_ranges": [{"start": 0x100, "end": 0x200, "toolchain": "agbcc", "flags": ["-O2"],
+                                "variant": "old_agbcc"},
+                               {"start": 0x200, "end": 0x300, "toolchain": "agbcc", "flags": ["-O1"]}]}
+    old = compiler_config(tmp_path, {"compiler": compiler_for(cfg, 0x180)})
+    assert f"{tmp_path / 'agbcc'}/bin/old_agbcc" in " ".join(old.cmd)
+    assert compiler_for(cfg, 0x280).get("variant") is None  # a range without one builds with agbcc itself
+    plain = compiler_config(tmp_path, {"compiler": compiler_for(cfg, 0x280)})
+    assert "old_agbcc" not in " ".join(plain.cmd) and f"{tmp_path / 'agbcc'}/bin/agbcc" in " ".join(plain.cmd)
+    with pytest.raises(toolchains.ToolchainError, match="no variant 'agbcc_arm'"):
+        compiler_config(tmp_path, {"compiler": {"toolchain": "agbcc", "variant": "agbcc_arm"}})
+
+
+def test_a_toolchains_prelude_names_its_own_folder(monkeypatch, tmp_path):
+    """agbcp's prelude points STLport at its headers in the toolchain's folder ({tc}), wherever that is installed."""
+    monkeypatch.setattr(toolchains.sys, "platform", "linux")
+    monkeypatch.delenv("DECOMP_WSL", raising=False)
+    monkeypatch.setattr(toolchains, "runtime_dirs", lambda tid: (tmp_path / tid, tmp_path / "arm-gnu"))
+    cfg = compiler_config(tmp_path, {"compiler": {"toolchain": "agbcp"}})
+    assert "{tc}" not in cfg.prelude and f"{tmp_path / 'agbcp'}/cpp-include" in cfg.prelude
+
+
 def test_linux_keeps_using_the_original_pinned_compiler(monkeypatch, tmp_path):
     monkeypatch.setattr(toolchains.sys, "platform", "linux")
     monkeypatch.delenv("DECOMP_WSL", raising=False)

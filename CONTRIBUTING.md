@@ -94,6 +94,7 @@ through one file: the connector, `consoles/__init__.py`.
 | `consoles/gc_wii/` | GameCube, Wii | PROJECT | `scratch.py` a dtk-template project for the game · `guides/` |
 | `consoles/pc/` | Windows PC | PROJECT | `scratch.py` Ghidra finds the functions, decompdecomp cuts them out of the .exe · `project_template/` · `guides/` |
 | `consoles/nds/` | Nintendo DS | PROJECT | `scratch.py` a ds-decomp project for the ROM, a CodeWarrior version per source file · `project_template/` · `guides/` |
+| `consoles/gba/` | Game Boy Advance | ROM | `split.py` the ROM's header and its functions (luvdis, not splat) · `candidates.py` code nothing calls · `edit.py` split_function · `export.py`, `export_build.py` the rebuildable tree · `guides/` (the judge: `rom/match_arm.py`) |
 
 Each folder's `__init__.py` makes its console: the facts and the parts the app calls. Start there. Its docstring
 lists its files.

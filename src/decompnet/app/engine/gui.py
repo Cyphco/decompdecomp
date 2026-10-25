@@ -36,7 +36,10 @@ class GuiMixin:
         from ...rom.export import export_rom
 
         proj = self._project(slug)
-        res = export_rom(self, slug, Path(proj["root"]) / "source", self.console(proj), log=log)
+        console = self.console(proj)
+        res = console.export(self, slug, Path(proj["root"]) / "source", log=log)  # its own (the GBA's), or splat's
+        if res is None:
+            res = export_rom(self, slug, Path(proj["root"]) / "source", console, log=log)
         with self.store.tx() as db:  # shown on the project page: what's in the tree and whether it rebuilds
             cfg = json.loads(db.execute("SELECT config FROM projects WHERE id=?", (proj["id"],)).fetchone()["config"])
             cfg["export"] = {"t": time.time(), "path": str(res["path"]), "identical": res.get("identical"),

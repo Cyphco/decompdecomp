@@ -53,6 +53,9 @@ class ImportMixin:
     def import_split(self, console: consoles.Console, picked: Picked, *, toolchain: str | None = None,
                      flags: list[str] | None = None, log=print, reimport_slug: str | None = None) -> str:
         """ROM mode: split the program `console` read from the user's file, store every function as a target."""
+        if not getattr(console, "splat", True):  # (Console has it; a stand-in console may not)
+            raise NetworkError(f"{console.name} games are split by their own reader, not splat: reimporting one "
+                               "isn't possible yet (start a new project from the game instead)")
         if reimport_slug is None:
             return self._import_split(console, picked, toolchain=toolchain, flags=flags, log=log)
         proj = self._project(reimport_slug)
@@ -307,6 +310,72 @@ class ImportMixin:
                 log(f"the old project files could not be removed; they remain at {backup}: {e}")
             log(f"reimport kept {preserved} matched functions whose targets were unchanged")
         log(f"ready: {len(res.functions)} functions to decompile")
+        return slug
+
+    def import_found(self, console: consoles.Console, picked: Picked, find, *, segments: list[dict],
+                     toolchain: str | None = None, flags: list[str] | None = None, log=print) -> str:
+        """ROM mode for a console whose own reader finds the functions (splat reads MIPS only: the GBA's luvdis,
+        consoles/gba/split.py). `find(workdir)` runs once the program is in the project folder and returns its
+        functions, each with name, vram, rom (its offset), code (its bytes, literal pool included), asm (the listing
+        agents read), n_insns, refs ([(offset, relocation type, address)]: its calls and pointers) and asm_only (the
+        name of a known hand-written helper, which keeps that name and stays assembly; else None)."""
+        info = picked.info
+        for p in self.store.all("SELECT slug, config FROM projects"):
+            if json.loads(p["config"]).get("rom", {}).get("sha1") == info["sha1"]:
+                log(f"already imported as {p['slug']}")
+                return p["slug"]
+        base = slugify(info["title"])
+        slug, n = base, 2
+        while self.store.one("SELECT 1 FROM projects WHERE slug=?", slug) or (self.workspace / slug).exists():
+            slug, n = f"{base}-{n}", n + 1
+        workdir = self.workspace / slug
+        workdir.mkdir(parents=True)
+        (workdir / picked.filename).write_bytes(picked.data)
+        size = f"{info['size'] // (1024 * 1024)} MiB" if info["size"] >= 1 << 20 else f"{info['size'] // 1024} KiB"
+        log(f"{console.name}: {info['title']} ({info['game_code'] or 'no game code'}, {info['region']}), {size}, "
+            f"looks built with {info['compiler_guess']}")
+        try:
+            found = find(workdir)
+        except BaseException:
+            shutil.rmtree(workdir, ignore_errors=True)  # a failed import leaves no half-made project to trip on
+            raise
+        chosen = bool(toolchain or flags)
+        toolchain = toolchain or console.default_compiler(info, "")
+        cfg = {
+            "kind": "rom", "platform": console.id, "big_endian": picked.big_endian, "gp": 0,
+            "rom": {**info, "file": picked.filename, "program": picked.filename},
+            "segments": segments,
+            "compiler": {"toolchain": toolchain, "flags": flags or console.default_flags(toolchain, 0), "timeout": 20},
+            "legal": {"basis": "personal-copy", "license": "personal use only",
+                      "statement": "imported by the owner of this copy of the game, who confirmed it was legally obtained",
+                      "confirmed_at": time.time()},
+            "context": {"file": None},
+        }
+        now = time.time()
+        with self.store.tx() as db:
+            pid = db.execute("INSERT INTO projects(slug,name,description,arch,big_endian,root,config) VALUES(?,?,?,?,?,?,?)",
+                             (slug, info["title"], f"{info['game_code']} · {info['region']} · {len(found)} functions",
+                              console.arch, int(picked.big_endian), str(workdir), json.dumps(cfg))).lastrowid
+            names: set[str] = set()
+            for f in found:
+                name = f.asm_only or f.name  # known hand-written helpers keep their real name and stay assembly
+                if name in names:  # a game can link a helper twice (Spyro Orange has two of _call_via_r3)
+                    name = f"{name}_{f.vram:08X}"
+                names.add(name)
+                db.execute(
+                    "INSERT INTO functions(project_id,name,size,n_insns,target,relocs,asm,seed,unit,vram,rom_offset,status) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (pid, name, len(f.code), f.n_insns, f.code, json.dumps([list(r) for r in f.refs or []]),
+                     f.asm.replace(f.name, name), None, segments[0]["name"], f.vram, f.rom,
+                     "asm" if f.asm_only else "open"))
+                db.execute("INSERT INTO symbols(project_id,name,address,size,kind,preview) VALUES(?,?,?,?,?,?)",
+                           (pid, name, f.vram, len(f.code), "func", None))
+            db.execute("INSERT INTO context_versions(project_id,version,header,agent_id,message,created_at,unit) "
+                       "VALUES(?,?,?,?,?,?,?)", (pid, 1, BASE_HEADER.format(title=info["title"]), None, "basic types",
+                                                 now, ""))
+            self._event(db, pid, None, "import", f"{len(found)} functions from {info['title']}")
+        console.after_import(self, slug, chosen=chosen, log=log)
+        log(f"ready: {len(found)} functions to decompile")
         return slug
 
     def reimport_rom(self, slug: str, data: bytes | Path, *, confirmed: bool = False, name: str = "",

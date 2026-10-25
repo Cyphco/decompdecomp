@@ -551,8 +551,11 @@ name = "Arm GNU Toolchain (arm-none-eabi)"
 kind = "tool"
 license = "GPL-3.0"
 source = "Arm GNU Toolchain 14.3.Rel1 (developer.arm.com)"
-description = "Arm's official assembler, linker and preprocessor for ARM and Thumb code: the DS demo game's start-up code; about 150 MB."
+description = "Arm's official assembler, linker and preprocessor for ARM and Thumb code: the DS demo game's start-up code, and agbcc's preprocessor and assembler (GBA); about 150 MB."
 binary_name = "bin/arm-none-eabi-as"
+# in WSL (agbcc's preprocessor and assembler on Windows) compiles read none of its C libraries and documentation:
+# left out of the copy there, 600 MB of small files fewer
+wsl_skip = ["arm-none-eabi/lib", "lib/gcc", "share"]
 [[arm-gnu.parts]]
 url = "https://developer.arm.com/-/media/Files/downloads/gnu/14.3.rel1/binrel/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi.tar.xz"
 sha256 = "8f6903f8ceb084d9227b9ef991490413014d991874a1e34074443c2a72b14dbd"
@@ -612,3 +615,79 @@ url = "https://github.com/encounter/dtk-template/archive/95a941f755919ebe50c1725
 sha256 = "c49f889a4e092388beef4867340887ec6f0410bd1055d79a8f8850bea89ada61"
 subdir = "dtk-template-95a941f755919ebe50c1725a4ce73524470e7a02"
 
+
+# Game Boy Advance (consoles/gba/): agbcc and its C++ frontend agbcp, and luvdis, which finds the functions
+[agbcc]
+name = "agbcc"
+platform = "GBA"
+arch = "arm"
+license = "GPL-2.0"
+source = "pret/agbcc release"
+description = "The GCC 2.95-based compiler behind most Game Boy Advance games, as rebuilt by the pret community."
+cc = ["{tc}/bin/agbcc"]
+flags = ["-mthumb-interwork", "-O2"]
+requires = ["arm-gnu"]
+variants = { old_agbcc = "{tc}/bin/old_agbcc" }  # the older snapshot in the same archive (some games' library code)
+# agbcc only compiles preprocessed C to assembly: preprocess, compile, assemble, like pret's builds
+cmd = ["/bin/sh", "-c", "src=\"$1\"; obj=\"$2\"; inc=\"$3\"; shift 3; \"{tc:arm-gnu}/bin/arm-none-eabi-cpp\" -nostdinc -undef -I \"{tc}/include\" -I \"$inc\" \"$src\" -o \"$obj.i\" && \"{tc}/bin/agbcc\" \"$@\" \"$obj.i\" -o \"$obj.s\" && \"{tc:arm-gnu}/bin/arm-none-eabi-as\" -mcpu=arm7tdmi -o \"$obj\" \"$obj.s\"", "agbcc", "{src}", "{obj}", "{include}", "{flags}"]
+[[agbcc.parts]]
+url = "https://github.com/pret/agbcc/releases/download/release/agbcc.tar.gz"
+sha256 = "bcf0197e3e27d8e08506a142e25fa68ea7f6679a98347a6406804eb3f9ff4d29"
+platforms = ["linux-x86_64"]
+
+[luvdis]
+name = "Luvdis"
+kind = "tool"
+license = "MIT"
+source = "aarant/luvdis @ ec3a4e3e"
+description = "Game Boy Advance disassembler: finds the functions in a ROM and writes assembly that rebuilds it."
+git = "https://github.com/aarant/luvdis"
+commit = "ec3a4e3ee3afe3e9b4a9c7ae8fffc65e1ea2096c"
+pip_extra = ["setuptools<70"]
+
+
+[agbcp]
+name = "agbcp (GBA C++ with STLport 4.1)"
+platform = "GBA"
+arch = "arm"
+license = "GPL-2.0; STLport and HP/SGI permissive headers"
+source = "notyourav/agbcc cp release; STLPORT41B4; StanHash/fomt libagbc++"
+description = "The historical GBA C++ frontend and STLport vector implementation; select only for functions proven with C++."
+cc = ["{tc}/bin/agbcp"]
+flags = ["-quiet", "-fno-exceptions", "-fno-rtti", "-fvtable-thunks", "-mthumb-interwork", "-O2", "-fhex-asm"]
+requires = ["arm-gnu"]
+cplusplus = true
+prelude = '''
+#ifdef __cplusplus
+#include <stl/_config.h>
+#undef __STL_NATIVE_INCLUDE_PATH
+#undef __STL_NATIVE_C_INCLUDE_PATH
+#undef __STL_NATIVE_CPP_C_INCLUDE_PATH
+#undef __STL_NATIVE_CPP_RUNTIME_INCLUDE_PATH
+#define __STL_NATIVE_INCLUDE_PATH {tc}/cpp-include
+#define __STL_NATIVE_C_INCLUDE_PATH {tc}/include
+#define __STL_NATIVE_CPP_C_INCLUDE_PATH {tc}/include
+#define __STL_NATIVE_CPP_RUNTIME_INCLUDE_PATH {tc}/cpp-include
+#include <vector>
+#endif
+'''
+cmd = ["/bin/sh", "-c", '''src="$1"; obj="$2"; inc="$3"; shift 3; case "$src" in *.cpp) ;; *) exit 1 ;; esac; "{tc:arm-gnu}/bin/arm-none-eabi-cpp" -x c++ -nostdinc -undef -D__GNUC__=2 -D__GNUC_MINOR__=9 -D__STL_NO_IOSTREAMS=1 -D__STL_NO_EXCEPTIONS=1 -D__STL_NO_NAMESPACES=1 -I "{tc}/stlport" -I "{tc}/cpp-include" -I "{tc}/include" -I "$inc" "$src" -o "$obj.i" && "{tc}/bin/agbcp" "$@" "$obj.i" -o "$obj.s" && "{tc:arm-gnu}/bin/arm-none-eabi-as" -mcpu=arm7tdmi -o "$obj" "$obj.s"''', "agbcp", "{src}", "{obj}", "{include}", "{flags}"]
+[[agbcp.parts]]
+url = "https://github.com/notyourav/agbcc/releases/download/cp/agbcc.tar.gz"
+file = "agbcp-cp-05a30f03.tar.gz"
+sha256 = "05a30f03ee916563bba29efdc9da64c47909892aa878002cf07e8e7ae5bd32f5"
+platforms = ["linux-x86_64"]
+[[agbcp.parts]]
+url = "https://codeload.github.com/LiveMirror/stlport/tar.gz/62133628b143bac118f7c5cc7395c68cc6cd99d1"
+file = "stlport41b4-62133628.tar.gz"
+sha256 = "82570ed66d729ffc8b1a37619c920a6d4422fa1c2212deb840ca507c460a2294"
+subdir = "stlport-62133628b143bac118f7c5cc7395c68cc6cd99d1/stlport"
+into = "stlport"
+platforms = ["linux-x86_64"]
+[[agbcp.parts]]
+url = "https://codeload.github.com/StanHash/fomt/tar.gz/b8471ae065744869f64283473ed68372f82321c9"
+file = "fomt-cpp-headers-b8471ae0.tar.gz"
+sha256 = "831e68595e5e328d3d2be8158e870b35fb6689f14ba2036540c99b2aace2ed00"
+subdir = "fomt-b8471ae065744869f64283473ed68372f82321c9/tools/libagbc++"
+into = "cpp-include"
+platforms = ["linux-x86_64"]

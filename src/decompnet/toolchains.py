@@ -60,6 +60,11 @@ class Toolchain:
     requires_java: int = 0  # minimum Java version (Ghidra)
     prelude: str = ""  # C put before every file it compiles: works around a compiler's own bugs (see toolchains.toml)
     cplusplus: bool = False  # it compiles C++ too (by the file's extension: .cpp)
+    # other binaries of the same archive a compiler range can pick ("variant"), each standing in for cc[0]:
+    # agbcc's old_agbcc, which some GBA games' library code was built with
+    variants: dict[str, str] = field(default_factory=dict)
+    # folders (relative to the toolchain's own) its WSL copy leaves out: what compiling never reads (wsl.prepare_tools)
+    wsl_skip: list[str] = field(default_factory=list)
 
     @property
     def proprietary(self) -> bool:

@@ -14,7 +14,11 @@ def compiler_for(cfg: dict, vram: int | None) -> dict:
     San Andreas: EE-GCC 2.95.3, and CodeWarrior 3.0.1 -O3 for some of its code), else the project's."""
     for r in cfg.get("compiler_ranges") or []:
         if vram is not None and r["start"] <= vram < r["end"]:
-            return {**cfg["compiler"], "toolchain": r["toolchain"], "flags": r["flags"]}
+            own = {**cfg["compiler"], "toolchain": r["toolchain"], "flags": r["flags"]}
+            own.pop("variant", None)  # the project's variant is its own compiler's, not the range's
+            if r.get("variant"):  # another binary of the range's toolchain (agbcc's old_agbcc: Toolchain.variants)
+                own["variant"] = r["variant"]
+            return own
     return cfg["compiler"]
 
 
@@ -37,7 +41,8 @@ def compiler_config(root: Path, cfg: dict) -> CompilerConfig:
             raise toolchains.ToolchainError(f"{tc.name} is a Linux program: on Windows it runs in WSL 2. {ok[1]}")
         dirs = toolchains.runtime_dirs(tc.id)
         try:
-            where_tools = wsl.prepare_tools(dirs) if linux else tuple(str(directory) for directory in dirs)
+            skip = {d.name: toolchains.get(d.name).wsl_skip for d in dirs if d.name in toolchains.registry()}
+            where_tools = wsl.prepare_tools(dirs, skip) if linux else tuple(str(directory) for directory in dirs)
         except (OSError, subprocess.SubprocessError) as error:
             raise toolchains.ToolchainError(f"{tc.name} couldn't be prepared in WSL: {error}") from None
         tc_dir = where_tools[0]
@@ -51,7 +56,15 @@ def compiler_config(root: Path, cfg: dict) -> CompilerConfig:
             base = [x for a in tc.cmd for x in (flags if a == "{flags}" else [a])]
         else:
             base = [*tc.cc, *flags, "-I{include}", "{src}", "-o", "{obj}"]
+        if (variant := c.get("variant")):
+            # another binary in the same pinned archive: some GBA library code needs agbcc's older snapshot, and its
+            # range keeps that choice so its matches stay matches
+            if variant not in tc.variants or not tc.cc:
+                known = ", ".join(sorted(tc.variants)) or "none"
+                raise toolchains.ToolchainError(f"{tc.name} has no variant {variant!r} (its variants: {known})")
+            base = [a.replace(tc.cc[0], tc.variants[variant]) for a in base]
         cmd = [a.replace("{tc}", tc_dir) for a in base]
+        prelude = prelude.replace("{tc}", tc_dir)  # agbcp's prelude names its STLport headers' folders
         for dep, where in zip(tc.requires, where_tools[1:]):  # {tc:<id>} is another toolchain this one needs
             cmd = [a.replace(f"{{tc:{dep}}}", where) for a in cmd]
     else:

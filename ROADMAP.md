@@ -15,39 +15,39 @@ Each feature and the platforms it covers today. A — is a gap: pick one up (the
 start). Keep this table true when a feature ships or reaches another platform. Each column's code is its console's
 folder, `src/decompnet/consoles/<id>/`; a new console adds a column (CONTRIBUTING.md, "Consoles").
 
-| Feature | N64 | PS1 | PS2 | GameCube · Wii | Windows PC | DS | Public decomps |
-| :-- | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
-| Status | recommended | beta | beta | beta | beta | beta | the project's own |
-| Start from your own copy | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | fork by address |
-| Judge | link · compare | link · compare | link · compare | objdiff | objdiff | objdiff | objdiff |
-| Machine drafts (m2c, Ghidra for x86) | ✓ | ✓ | ✓ | ✓ | ✓ Ghidra | — | by architecture |
-| Autopilot: free matches from drafts | ✓ | ✓ | ✓ | ✓ | — | — | — |
-| Drafts follow the header, made in the background; `redraft` | ✓ | ✓ | ✓ | — | — | — | — |
-| C++ methods drafted as `Class::method` | ✓ | ✓ | ✓ | — | — | — | — |
-| Twins: free matches from identical code | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Permuter on near misses | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Hand-written assembly set aside | ✓ | ✓ | ✓ | ✓ | — | BIOS call stubs, pieces of functions | MIPS, PowerPC, ARM's BIOS stubs and pieces of functions |
-| Pieces of functions joined to their function | — | — | — | — | — | ✓ (`recover.merge_pieces`) | — |
-| Agents' verdict "no C makes this" (3 agents of 2 models: set aside, red in the map) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Check again (and before helpers start, once after each update) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Kernel stubs set aside and named | — | set aside (BIOS calls) | ✓ | — | — | — | — |
-| Function-end reports (`report_boundary`) | ✓ | ✓ | ✓ | — | — | — | — |
-| Compiler ranges and suggestions | ✓ | ✓ | ✓ | from scratch: per source file (`try_compiler`, Settings); else the project's build | the project's build | per source file (`try_compiler`, Settings) | the project's build |
-| Flag search (`search_flags`) | ✓ | ✓ | ✓ | the project's build | the project's build | the project's build | the project's build |
-| Compiler map and the judge's survey | ✓ | ✓ | ✓ | — | — | — | — |
-| Range checks: a range applies after its neighbours confirm it | ✓ | ✓ | ✓ | — | — | — | — |
-| C++ classes from the code (`get_class`) | ✓ | ✓ | ✓ | — | — | — | — |
-| Struct layouts from loads and stores (`guess_struct`) | ✓ | ✓ | ✓ | — | — | — | — |
-| The game's own debug symbols: names, types, prototypes | — | — | ✓ symbol table, STABS; the compiler of each object file | — | — | — | — |
-| Twins across your games | ✓ | ✓ | ✓ | — | — | — | — |
-| Shared knowledge (two models agree) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Polish matched code (still matching) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Real names for the game's symbols (`rename_symbol`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | dtk and ds-decomp projects |
-| Save and restore (`progress/`, Open a saved project) | ✓ | ✓ | ✓ | the project's git; best attempts saved | the project's git; best attempts saved | the project's git; best attempts saved | the project's git; best attempts saved |
-| Saved README preserves notes, with completion bar and function map | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Reimport: a new split, matched work kept (Settings) | ✓ | ✓ | ✓ | — | — | — | — |
-| Rebuildable export | ✓ | ✓ | ✓ | the project | — | the project | the project |
-| Progress bars for foreground jobs | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Feature | N64 | PS1 | PS2 | GameCube · Wii | Windows PC | DS | GBA | Public decomps |
+| :-- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| Status | recommended | beta | beta | beta | beta | beta | beta | the project's own |
+| Start from your own copy | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ (luvdis) | fork by address |
+| Judge | link · compare | link · compare | link · compare | objdiff | objdiff | objdiff | link · compare (Thumb) | objdiff |
+| Machine drafts (m2c, Ghidra for x86) | ✓ | ✓ | ✓ | ✓ | ✓ Ghidra | — | ✓ | by architecture |
+| Autopilot: free matches from drafts | ✓ | ✓ | ✓ | ✓ | — | — | — | — |
+| Drafts follow the header, made in the background; `redraft` | ✓ | ✓ | ✓ | — | — | — | — | — |
+| C++ methods drafted as `Class::method` | ✓ | ✓ | ✓ | — | — | — | — | — |
+| Twins: free matches from identical code | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ |
+| Permuter on near misses | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ |
+| Hand-written assembly set aside | ✓ | ✓ | ✓ | ✓ | — | BIOS call stubs, pieces of functions | BIOS call stubs, `_call_via_rN` | MIPS, PowerPC, ARM's BIOS stubs and pieces of functions |
+| Pieces of functions joined to their function | — | — | — | — | — | ✓ (`recover.merge_pieces`) | — | — |
+| Agents' verdict "no C makes this" (3 agents of 2 models: set aside, red in the map) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ |
+| Check again (and before helpers start, once after each update) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ |
+| Kernel stubs set aside and named | — | set aside (BIOS calls) | ✓ | — | — | — | — | — |
+| Function-end reports (`report_boundary`) | ✓ | ✓ | ✓ | — | — | — | — | — |
+| Compiler ranges and suggestions | ✓ | ✓ | ✓ | from scratch: per source file (`try_compiler`, Settings); else the project's build | the project's build | per source file (`try_compiler`, Settings) | ranges (agbcp, `old_agbcc`) | the project's build |
+| Flag search (`search_flags`) | ✓ | ✓ | ✓ | the project's build | the project's build | the project's build | — | the project's build |
+| Compiler map and the judge's survey | ✓ | ✓ | ✓ | — | — | — | — | — |
+| Range checks: a range applies after its neighbours confirm it | ✓ | ✓ | ✓ | — | — | — | — | — |
+| C++ classes from the code (`get_class`) | ✓ | ✓ | ✓ | — | — | — | — | — |
+| Struct layouts from loads and stores (`guess_struct`) | ✓ | ✓ | ✓ | — | — | — | — | — |
+| The game's own debug symbols: names, types, prototypes | — | — | ✓ symbol table, STABS; the compiler of each object file | — | — | — | — | — |
+| Twins across your games | ✓ | ✓ | ✓ | — | — | — | — | — |
+| Shared knowledge (two models agree) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ |
+| Polish matched code (still matching) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ |
+| Real names for the game's symbols (`rename_symbol`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | dtk and ds-decomp projects |
+| Save and restore (`progress/`, Open a saved project) | ✓ | ✓ | ✓ | the project's git; best attempts saved | the project's git; best attempts saved | the project's git; best attempts saved | ✓ | the project's git; best attempts saved |
+| Saved README preserves notes, with completion bar and function map | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ |
+| Reimport: a new split, matched work kept (Settings) | ✓ | ✓ | ✓ | — | — | — | — | — |
+| Rebuildable export | ✓ | ✓ | ✓ | the project | — | the project | ✓ | the project |
+| Progress bars for foreground jobs | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ |
 | Rooms: decompile together | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 Where to start on a gap:
@@ -65,6 +65,12 @@ Where to start on a gap:
 
 ## Recently done
 
+- **Game Boy Advance from scratch again.** The GBA support the 1.0.3 rewrite left in the git history is a console
+  package now (`consoles/gba/`): luvdis finds the functions, the Thumb judge links them at their addresses, agbcc and
+  agbcp (C++) build them, a range can pick agbcc's `old_agbcc`, and the export rebuilds the ROM byte for byte. On
+  Windows agbcc runs in WSL, with the Arm toolchain's preprocessor and assembler copied there without its C libraries.
+  Projects the 1.0.2 app made open as they were: 3306 of the 3307 matches of the owner's GBA game judge the same
+  (the other's saved C still named the function as it was before a rename).
 - **Saved guides keep your notes.** Saving creates a basic README only when one is missing. Later saves update
   counts and visuals inside hidden comment pairs, preserving the rest of the guide. A local SVG progress card
   shows completion, platform and a function map in ROM and project mode; it contains no game code.
@@ -259,6 +265,15 @@ ROM mode needs the same, with more to carry: a split version in each project, an
 functions take over the old ones' work (matches, attempts, notes, claims) by address, kept only when every matched
 function still matches and the export still rebuilds the game byte for byte. Functions the new split cuts or joins
 go back to the queue with their old attempts as notes. Each improvement to the split bumps the version.
+
+### The rest of the features on the GBA
+
+The GBA is ROM mode without splat (`consoles/gba/`): luvdis finds its functions and `rom/match_arm.py` judges them,
+so what reads splat's listings or MIPS code doesn't reach it yet. Checked on it: the import, drafts, the judge,
+compiler ranges (agbcp's C++, agbcc's `old_agbcc`), split_function, renames, saves and the export. Not yet: twins,
+the autopilot and the permuter (all read a function's code through the shared ROM path, untried on Thumb), function-end
+reports and the extent repair the 1.0.2 GBA code had (`report_boundary`, cut by halfwords), reimport (it re-splits with
+splat), and the compiler map. Each gets its GBA cell in the table above when it's run on a GBA game.
 
 ### How much usage each agent has left
 

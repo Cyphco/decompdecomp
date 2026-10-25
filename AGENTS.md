@@ -53,7 +53,7 @@ compilers are only installed after the user accepts that in Setup; don't add cod
 ## Consoles, and the two ways a game is decompiled
 
 Each console's code is in its own folder, `src/decompnet/consoles/<id>/`: `n64/`, `ps1/`, `ps2/`, `gc_wii/`
-(GameCube and Wii), `pc/` (Windows games), `nds/` (Nintendo DS). Its `__init__.py` makes the console (its facts and
+(GameCube and Wii), `pc/` (Windows games), `nds/` (Nintendo DS), `gba/` (Game Boy Advance). Its `__init__.py` makes the console (its facts and
 parts) and its docstring lists its files. `consoles/__init__.py` is the connector: the `Console` class (every fact and part, one line each) and the
 list of consoles. The rest of the app asks `consoles.get(platform)` (in the engine: `self.console(proj)`) and never
 compares console names: a console-specific `if` outside `consoles/` is a bug. What depends only on the processor
@@ -63,7 +63,9 @@ compares console names: a console-specific `if` outside `consoles/` is a bug. Wh
 1. **ROM mode** (N64, PS1, PS2): `src/decompnet/rom/` splits the game (splat/spimdisasm, `split.py`; the console adds the
    code splat misses), and `rom/match.py` *links* each compiled candidate at the function's real address and
    compares bytes. Driven by `app/engine/` (one module per topic, `__init__.py` lists them; `common.py` holds what they share). Exported as a
-   rebuildable tree by `rom/export*.py`.
+   rebuildable tree by `rom/export*.py`. The GBA is ROM mode without splat (`splat = False`): luvdis finds its
+   functions (`consoles/gba/split.py`, stored by `net.import_found`), `rom/match_arm.py` judges Thumb code
+   (`Console.rom_link`), and the console cuts and exports its functions itself (`split_function`, `export`).
 2. **PROJECT mode** (GameCube/Wii/PC/DS started from scratch, and public decomps forked by repository address): a
    community-shaped project on disk with an `objdiff.json`; objdiff judges each unit. The console makes the project
    (`consoles/gc_wii/scratch.py`: dtk-template; `consoles/pc/scratch.py`: Ghidra finds functions, decompdecomp

@@ -187,7 +187,8 @@ the game.
 | **GameCube · Wii** | Beta | ✓ disc (ISO, RVZ, WBFS…) or DOL | CodeWarrior GC 1.0 – Wii 1.7 | ✓ dtk-template | ✓ |
 | **Windows PC** | Beta | ✓ program (32-bit x86 .exe) | Visual C++ 6.0 · 7.0 · 7.1 | — | ✓ |
 | **Nintendo DS** | Beta | ✓ ROM (.nds) | CodeWarrior for DS 1.2 – DSi 1.6 (24 versions), one per source file | ✓ ds-decomp | ✓ |
-| **GBA · 3DS · PSP · Switch · Xbox · Xbox 360** | Public decomps only | | | | ✓ |
+| **Game Boy Advance** | Beta | ✓ ROM (.gba) | agbcc (and its `old_agbcc`) · agbcp (C++ with STLport) | ✓ export | ✓ |
+| **3DS · PSP · Switch · Xbox · Xbox 360** | Public decomps only | | | | ✓ |
 
 [ROADMAP.md](../ROADMAP.md) has a table of which feature works on which platform.
 

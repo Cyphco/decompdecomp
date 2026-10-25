@@ -39,6 +39,9 @@ class EditMixin:
         syms = self.symbols(proj["id"])
         if not IDENT.match(new_name) or new_name in syms.by_name:
             raise NetworkError(f"`{new_name}` is not a free C identifier")
+        own = self.console(proj).split_function(self, agent, proj, fn, addr, new_name, syms)
+        if own is not None:  # a console whose functions aren't splat's cuts them its own way (the GBA's)
+            return own
         head, tail = self._cut(proj, fn, addr, new_name, syms, agent.id, "split", f"{fn['name']} / {new_name}")
         return (f"✅ split: {fn['name']} is now {len(head.lines)} instructions; {new_name} at 0x{addr:08X} has "
                 f"{len(tail.lines)}. Continue with {fn['name']} (get_function shows its new assembly).")

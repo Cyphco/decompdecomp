@@ -1,5 +1,5 @@
 """The connector: how decompdecomp talks to a console. Every console is a package in this folder (consoles/n64/,
-consoles/ps1/, consoles/ps2/, consoles/gc_wii/, consoles/pc/, consoles/nds/) whose `__init__.py` makes a `Console`
+consoles/ps1/, consoles/ps2/, consoles/gc_wii/, consoles/pc/, consoles/nds/, consoles/gba/) whose `__init__.py` makes a `Console`
 below and fills in its parts; the list at the end of this file registers them. The rest of the app (the engine, briefs, twins, the agents' tools
 and prompts, the export, the GUI's API) asks the console of a project, `consoles.get(platform)`, and never compares
 console names. A person or an agent working on PS2 support reads consoles/ps2/ and this file, nothing else.
@@ -7,7 +7,8 @@ console names. A person or an agent working on PS2 support reads consoles/ps2/ a
 A console works in one of two modes:
 - ROM: decompdecomp splits the game itself (splat, rom/split.py), and the judge links each compiled candidate at the
   function's real address and compares the bytes (rom/match.py). The console reads its file (`read_game`), names its
-  compilers and flags, and may add code splat's own look misses (`add_code`). N64, PS1 and PS2.
+  compilers and flags, and may add code splat's own look misses (`add_code`). N64, PS1 and PS2; the GBA too, whose
+  functions its own reader finds (`splat = False`, net.import_found) and its own linker judges (`rom_link`).
 - PROJECT: decompdecomp generates the community's kind of project for the game (a git tree with an objdiff.json),
   and objdiff judges each function in the project's own build (forks/, app/forkengine.py). The console makes the
   project (`create_project`) and points its build at the pinned tools (`tool_args`). GameCube, Wii, PC and DS.
@@ -80,6 +81,9 @@ class Console:
     as_flags: tuple[str, ...] = ()
     image_ext = ".bin"
     asm_preamble = '.include "macro.inc"\n.set noat\n.set noreorder\n.section .text, "ax"\n'
+    # ROM mode: splat splits its programs (rom/split.py); False: the console finds its functions itself and its
+    # import_game hands them to net.import_found (the GBA: luvdis), so a reimport through splat isn't offered
+    splat = True
 
     def __init__(self, **facts):
         for key, value in facts.items():  # a console with only facts (consoles/public.py)
@@ -142,6 +146,27 @@ class Console:
         """Before splat splits: code its own look misses (segments loaded later, overlays), added to its config.
         Returns the image splat reads."""
         return image
+
+    def rom_target_obj(self, fn):
+        """ROM mode: a function's target as the diff shows it (an elfobj.FunctionObj), when the console's judge isn't
+        the shared one (rom/match.py reads MIPS); None: the shared one's."""
+        return None
+
+    def rom_link(self, obj: bytes, fn, symbols, read):
+        """ROM mode: the compiled object `obj` linked at function `fn`'s address and compared with the game's bytes
+        (a rom.match.LinkResult), when the console's judge isn't the shared one; None: the shared one judges it."""
+        return None
+
+    def export(self, net, slug: str, out: Path, log=print) -> dict | None:
+        """ROM mode, EXPORT: write the rebuildable tree to `out` and build it once ({"path", "identical", "matched",
+        ...}), when its functions aren't splat's; None: the shared export (rom/export.py, from splat's config)."""
+        return None
+
+    def split_function(self, net, agent, proj, fn, addr: int, new_name: str, syms) -> str | None:
+        """ROM mode, split_function: cut function `fn` at `addr`, the rest becoming `new_name`, when its functions
+        aren't splat's (their bytes and listing kept as the console's own reader made them); what to tell the agent.
+        None: the shared cut (splat's listing, editing.py)."""
+        return None
 
     def find_gp(self, image: bytes, program: bytes, segments: list) -> int:
         """$gp as the game sets it, when splat didn't say (0: the game keeps no data $gp-relative)."""
@@ -297,6 +322,7 @@ class Console:
 
 
 def _registry() -> list[Console]:
+    from .gba import GBA
     from .gc_wii import GAMECUBE, WII
     from .n64 import N64
     from .nds import NDS
@@ -307,7 +333,7 @@ def _registry() -> list[Console]:
 
     # the order sniff is asked in: a file is the first console's that says it's its own (the PS1 before the PS2,
     # whose sniff takes any ISO 9660 disc)
-    return [N64, PS1, PS2, GAMECUBE, WII, PC, NDS, *PUBLIC_ONLY]
+    return [N64, PS1, PS2, GAMECUBE, WII, PC, NDS, GBA, *PUBLIC_ONLY]
 
 
 CONSOLES: list[Console] = _registry()
