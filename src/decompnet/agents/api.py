@@ -377,7 +377,9 @@ def api_tool_schemas(fork: bool = False) -> list[dict]:
                              s(function=st("function", True), notes=st("what you tried, what is left", True),
                                not_c=bo("true when you're sure no C makes its code (hand-written assembly); say why in notes"),
                                needs=st("optional: another function this one needs done first (a callee or inlined "
-                                        "helper): it then goes first and is handed to you"))),
+                                        "helper): it then goes first and is handed to you"),
+                               start_from=st("optional: C that does what the game does, when the best attempt scores "
+                                             "lowest but doesn't: kept as the best attempt for the next agent"))),
         "get_context": ("The shared header included in every compile.", s()),
         "edit_context": ("Replace `old` (exactly once) with `new` in the shared header, or append when old is empty.",
                          s(old=st("text to replace, or empty", True), new=st("replacement", True),

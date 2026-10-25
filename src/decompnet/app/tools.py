@@ -75,7 +75,8 @@ one claim; one function back is normal.)
    release_function with precise notes (what you tried, what is left) and claim the next one. Before
    that, compile the next step instead of releasing. Needs another function done first (a callee, an inlined
    helper)? release_function(needs=that one) hands it to you. Sure that
-   no C makes its code at all (hand-written assembly): not_c=true, saying why.
+   no C makes its code at all (hand-written assembly): not_c=true, saying why. The best attempt scores
+   lowest but doesn't do what the game does? release_function(start_from=C that does) makes that the start.
 
 Write plausible original code, pure C (no inline asm). Never fetch or copy code from outside this project
 (another repository, a finished decomp of this game, the internet): a match must come from your own C. Be brief
@@ -154,7 +155,8 @@ neighbours may come along in one claim; one function back is normal.)
    the code before set, a switch's cases in the next symbol)? join_functions(it, the other part, why), so it
    becomes one whole function. Very large functions: get the structure right first; a near miss
    is worth the extra compiles. Another function of the game it needs done first (a callee, an inlined
-   helper): release_function(needs=that one) hands it to you.
+   helper): release_function(needs=that one) hands it to you. A best attempt that scores lowest but doesn't
+   do what the game does: release_function(start_from=C that does) makes that the start.
 
 Rules: C/C++ only (no inline asm, asm functions or asm includes); don't touch targets, configs or build
 scripts (the tools refuse). Never fetch or copy code from outside this project (another repository, a
@@ -299,8 +301,8 @@ HANDLERS: dict[str, Callable[..., str]] = {
     "get_function": lambda net, agent, slug, function: net.get_function(function, slug, agent),
     "compile_and_diff": lambda net, agent, slug, function, source: _compile(net, agent, slug, function, source),
     "last_diff": lambda net, agent, slug, function, context=2: net.last_diff(agent, function, slug, context),
-    "release_function": lambda net, agent, slug, function, notes, needs="", not_c=False:
-        net.release_function(agent, function, notes, slug, needs or "", bool(not_c)),
+    "release_function": lambda net, agent, slug, function, notes, needs="", not_c=False, start_from="":
+        net.release_function(agent, function, notes, slug, needs or "", bool(not_c), start_from or ""),
     "get_context": lambda net, agent, slug, function="": net.get_context(slug, function or None),
     "edit_context": lambda net, agent, slug, old, new, message, function="":
         net.edit_context(agent, slug, old, new, message, function or None),
@@ -442,7 +444,8 @@ def build_mcp(net: RomNetwork, agent_of: Callable[[Context], tuple[Agent, str]])
         return await run(ctx, "last_diff", function=function, context=context)
 
     @mcp.tool(meta=ALWAYS_LOAD)
-    async def release_function(ctx: Context, function: str, notes: str, needs: str = "", not_c: bool = False) -> str:
+    async def release_function(ctx: Context, function: str, notes: str, needs: str = "", not_c: bool = False,
+                               start_from: str = "") -> str:
         """Give up a function you're stuck on, once compile_and_diff says to move on. Notes are required: what you
         tried, what is left. Your best attempt is kept for the next agent. Released before that (fewer compiles than
         the move-on rule), it answers once with what to try instead; call it again to release anyway.
@@ -454,9 +457,13 @@ def build_mcp(net: RomNetwork, agent_of: Callable[[Context], tuple[Agent, str]])
                 body it depends on, a helper the original inlines). This one then waits, that one goes first in the
                 queue, and you get it when it's free.
             not_c: true when you're sure no C makes its code at all (hand-written assembly), saying why in notes:
-                once agents of two models agree, it's set aside and no one is handed it again.
+                once three agents of two models agree, it's set aside and no one is handed it again.
+            start_from: when the best attempt scores lowest but doesn't do what the game does (passes the wrong
+                argument, truncates a pointer): C that does, judged now and kept as the best attempt for the next
+                agent to start from, although it scores worse. The lower-scoring C stays among the attempts.
         """
-        return await run(ctx, "release_function", function=function, notes=notes, needs=needs, not_c=not_c)
+        return await run(ctx, "release_function", function=function, notes=notes, needs=needs, not_c=not_c,
+                         start_from=start_from)
 
     @mcp.tool(meta=ALWAYS_LOAD)
     async def get_context(ctx: Context, function: str = "") -> str:

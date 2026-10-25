@@ -183,7 +183,7 @@ class JudgeMixin:
         return said
 
     def release_function(self, agent: Agent, function: str, notes: str, project: str | None = None,
-                         needs: str = "", not_c: bool = False) -> str:
+                         needs: str = "", not_c: bool = False, start_from: str = "") -> str:
         """release_function as agents call it (the app's own releases and a room host's go straight to release).
         On a demo fork and a large x86 game, agents released functions seconds after claiming them, untried,
         for reasons a compile would have shown were none (12,565 releases, median 5 s after the claim): so a release
@@ -192,11 +192,20 @@ class JudgeMixin:
         depends on, an inlined helper): recorded (it waits, that one goes first) and claimed for the agent when free.
         A release without a compile doesn't count against the session's claims, and says so. `not_c`: the agent's
         verdict that no C makes it (Network.release), which isn't pushed back: it's a finding, not giving up, and
-        it counts only once agents of two models agree."""
+        it counts only once NOT_C_AGENTS agents of NOT_C_MODELS models agree. `start_from`: C that does what the game
+        does, for the next agent to start from although it scores worse than the best (_start_from)."""
         fn = self._function(function, project)
+        if start_from.strip():
+            res = self._start_from(agent, fn, start_from, project)
+            if res.get("matched"):
+                return res["text"]
+            notes = (f"{notes.strip()}\n(The best attempt is now C that does what the game does, score {res['score']}: "
+                     f"the lower-scoring C before it doesn't.)").strip()
+            fn = self._function(function, project)
         need = self._prerequisite(agent, fn, needs, project) if needs.strip() else None
         progress = self.claim_progress(agent, fn)
-        if not not_c and need is None and progress is not None and \
+        # (a verdict or C that does what the game does is a finding, not giving up: not pushed back)
+        if not not_c and not start_from.strip() and need is None and progress is not None and \
                 (push := self._push_back(agent, fn, progress, project)):
             return push
         said = self.release(agent, function, notes, project, not_c)
@@ -212,6 +221,27 @@ class JudgeMixin:
             said += ("\nClaim the next function now, until you've done your session's full count of claims: the "
                      "functions left are the hard ones, and that's no reason to stop early.")
         return said
+
+    def _start_from(self, agent: Agent, fn, source: str, project: str | None) -> dict:
+        """C an agent says does what the game does, judged like any attempt and made the function's best attempt
+        even though it scores worse: the best by score alone was C that doesn't (a GBA game's best passed the new
+        record where the game passes the old handle, another's compared a pointer's low halfword), and every next
+        agent started from it. The lower-scoring C stays among the attempts. The attempt's result."""
+        if self._link(project) is not None:
+            raise NetworkError("in a team room the host keeps each function's best attempt: say in your notes which "
+                               "C does what the game does")
+        res = self.attempt(agent, fn["name"], source, project)
+        if res.get("matched"):
+            return res
+        if res.get("score") is None:
+            raise NetworkError(f"start_from doesn't compile, so nothing was released:\n{res.get('text', '')[:1500]}")
+        with self.store.tx() as db:
+            db.execute("UPDATE functions SET best_score=?, best_source=?, best_agent_id=? WHERE id=? AND status='open'",
+                       (res["score"], source, agent.id, fn["id"]))
+            self._event(db, fn["project_id"], agent.id, "start_from",
+                        f"{fn['name']}: starts from C that does what the game does (score {res['score']}, "
+                        f"the best was {fn['best_score']})")
+        return res
 
     def _pivot(self, agent: Agent, project: str | None, need) -> str:
         """The function a release said it needs, claimed for the agent when it's free: what to tell it."""
