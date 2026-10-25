@@ -9,7 +9,8 @@ real range shows on its neighbours too.
 
 A check walks out from the function that started it, on both sides, and gives each neighbour a verdict:
 - confirmed: its C matches the game with the range's compiler and not with today's (the judge, both compilers);
-- refuted: it's matched with today's compiler and its C doesn't match with the range's, or its code shows a habit
+- refuted: it's matched with today's compiler and its C compiles with the range's but doesn't match (C that doesn't
+  compile with it says nothing about the compiler: neutral), or its code shows a habit
   the range's compiler never has (compilermap: -G0 code never reads through $gp, ...), or the judge's survey
   confirmed another compiler for it;
 - neutral: its C matches with both (too little code to tell), or it's too short to test;
@@ -144,10 +145,10 @@ class RangeChecks:
         """The open checks, each a copy of its own to change (the settings they're read from are shared)."""
         return [copy.deepcopy(c) for c in self.net.cfg(proj).get("range_checks", []) if c["status"] in OPEN]
 
-    def _judged(self, proj, fn, label, source: str) -> bool:
+    def _judged(self, proj, fn, label, source: str) -> bool | None:
         """The judge's verdict on C built with a compiler (toolchain, flags, variant), remembered by the C's hash: a
         recheck after every match asked the same questions again, two compiles for each neighbour. A new header
-        version asks again."""
+        version asks again. None: the C doesn't compile with it (or the function isn't in what it made)."""
         ctx = self.net._context(proj["id"], fn["unit"])
         # shortcut: a renamed symbol can change what C links to, and a remembered verdict doesn't see it until the
         # app restarts; key verdicts by the symbols' version too if a check ever goes wrong that way
@@ -157,7 +158,8 @@ class RangeChecks:
             if len(self._verdicts) >= VERDICTS_KEPT:
                 self._verdicts.pop(next(iter(self._verdicts)))  # the oldest
             variant = {"variant": label[2]} if label[2] else {}
-            self._verdicts[key] = self.net._judge_with(proj, fn, label[0], list(label[1]), source, **variant)[0]
+            ok, _, problem = self.net._judge_with(proj, fn, label[0], list(label[1]), source, **variant)
+            self._verdicts[key] = None if problem else ok
         return self._verdicts[key]
 
     def _classify(self, proj, cfg, fn, label, cmap, survey: dict, source: str | None = None,
@@ -191,7 +193,11 @@ class RangeChecks:
             src = fn["matched_source"]
             if built == mine:
                 return "neutral" if judge(other, src) else "confirmed"
-            return "neutral" if judge(mine, src) else "refuted"
+            # C that doesn't compile with the range's compiler says nothing about which compiler built it: a GBA
+            # game's C neighbours of C++ methods aren't valid C++, and every range agents found for those methods was
+            # dismissed as a quirk on such "refutations", matches included
+            said = judge(mine, src)
+            return "neutral" if said is None or said else "refuted"
         src = source or self.net._source_of(fn)
         if not src or not judge(mine, src):
             return "unknown"
