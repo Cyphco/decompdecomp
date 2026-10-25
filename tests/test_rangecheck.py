@@ -53,6 +53,7 @@ class FakeNet:
             "compiler": {"toolchain": GCC[0], "flags": GCC[1]}, "compiler_ranges": [], "big_endian": False})}
         self.rows = functions
         self.matches = matches  # name -> set of toolchains its C matches with
+        self.uncompilable = set()  # (name, toolchain): its C doesn't compile with that compiler
         self.priority, self.notes, self.events, self.applied = [], [], [], []
         self.sql, self.judged = [], []  # what was read, and what the judge was asked
         self.store = self
@@ -101,6 +102,8 @@ class FakeNet:
 
     def _judge_with(self, proj, fn, toolchain, flags, source):
         self.judged.append((fn["name"], toolchain))
+        if (fn["name"], toolchain) in self.uncompilable:
+            return False, None, "error: syntax error before `*'"
         said = self.matches.get(fn["name"], set())  # toolchains, or (toolchain, flags) where the flags matter
         return toolchain in said or (toolchain, tuple(flags)) in said, None, ""
 
@@ -160,6 +163,22 @@ def test_neighbours_built_by_the_games_compiler_on_both_sides_make_it_a_quirk():
     assert check["status"] == "quirk" and not net.applied
     assert net.cfg(net.proj)["suggestions"][0]["status"] == "dismissed"
     assert any(fn == "f4" and "Look for C that matches with the project's compiler" in t for fn, t in net.notes)
+
+
+def test_c_that_doesnt_compile_with_the_ranges_compiler_refutes_nothing():
+    """A GBA game's C++ methods sit among C functions whose C isn't valid C++: each range agents found for a method,
+    matches included, was dismissed as a quirk because its neighbours' C "didn't match" with agbcp, when it didn't
+    even compile. That's no evidence either way: the check goes on, and the suggestion isn't dismissed."""
+    rows = functions(9)
+    for r in rows:
+        if r["name"] in ("f3", "f5"):
+            r.update(status="matched", matched_source=r["name"])
+    net = FakeNet(rows, {"f4": {CW[0]}, "f3": {GCC[0]}, "f5": {GCC[0]}})
+    net.uncompilable = {(name, CW[0]) for name in ("f3", "f5")}
+    _, check = start(net)
+    assert check["status"] in ("checking", "waiting") and not net.applied
+    assert net.cfg(net.proj)["suggestions"][0]["status"] == "open"
+    assert not any("Look for C that matches with the project's compiler" in t for _, t in net.notes)
 
 
 def test_c_that_matches_with_both_compilers_is_no_evidence():
