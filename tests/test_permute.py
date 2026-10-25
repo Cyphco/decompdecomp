@@ -53,6 +53,12 @@ class FakeNet:
     def _expire_claims(self, db):
         pass
 
+    def _update_cfg(self, slug, change):
+        cfg = self.cfg(self.project_row(slug))
+        change(cfg)
+        with self.store.tx() as db:
+            db.execute("UPDATE projects SET config=? WHERE slug=?", (json.dumps(cfg), slug))
+
 
 class ScriptedPermuter(Permuter):
     """Scores from a table (C -> score; None: it doesn't compile; anything else is far off)."""
@@ -345,3 +351,23 @@ def test_decomp_permuter_writes_variants_of_c_with_its_own_macros_and_extern_c()
         assert len(wrapped) == 8 and all(v.startswith('extern "C" {') and v.rstrip().endswith("}") for v in wrapped)
     finally:
         gen.close()
+
+
+def test_c_decomp_permuter_reads_now_gets_its_turns_again_once():
+    """A GBA game's 21 near misses with macros of their own had used all their turns on the simple rewrites: once
+    decomp-permuter reads them, they get their turns again, once per project; C it read before keeps its count."""
+    net = FakeNet()
+    with net.store.tx() as db:
+        db.execute("UPDATE functions SET permuted=?, best_source=? WHERE id=1",
+                   (MAX_TURNS, "#define W(p) (*(s32 *)(p))\n" + SOURCE))
+        db.execute("INSERT INTO functions(id, project_id, name, n_insns, best_score, best_source, permuted) "
+                   "VALUES(2, 1, 'g', 10, 40, ?, ?)", (SOURCE, MAX_TURNS))
+        db.execute("INSERT INTO functions(id, project_id, name, n_insns, best_score, best_source, permuted) "
+                   "VALUES(3, 1, 'h', 10, 40, 'extern \"C\" { int h(void) { return 0; } }', ?)", (MAX_TURNS,))
+    p = Permuter(net)
+    assert p.fresh_turns("game") == 2
+    turns = {r["name"]: r["permuted"] for r in net.store.all("SELECT name, permuted FROM functions")}
+    assert turns == {"f": 0, "g": MAX_TURNS, "h": 0}
+    with net.store.tx() as db:
+        db.execute("UPDATE functions SET permuted=?", (MAX_TURNS,))
+    assert p.fresh_turns("game") == 0  # (once)
