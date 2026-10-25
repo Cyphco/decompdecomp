@@ -25,7 +25,7 @@ folder, `src/decompnet/consoles/<id>/`; a new console adds a column (CONTRIBUTIN
 | Drafts follow the header, made in the background; `redraft` | ✓ | ✓ | ✓ | — | — | — | — | — |
 | C++ methods drafted as `Class::method` | ✓ | ✓ | ✓ | — | — | — | — | — |
 | Twins: free matches from identical code | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ |
-| Permuter on near misses | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ |
+| Permuter on near misses | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Hand-written assembly set aside | ✓ | ✓ | ✓ | ✓ | — | BIOS call stubs, pieces of functions | BIOS call stubs, `_call_via_rN` | MIPS, PowerPC, ARM's BIOS stubs and pieces of functions |
 | Pieces of functions joined to their function | — | — | — | — | — | ✓ (`recover.merge_pieces`) | — | — |
 | Agents' verdict "no C makes this" (3 agents of 2 models: set aside, red in the map) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ |
@@ -272,8 +272,9 @@ go back to the queue with their old attempts as notes. Each improvement to the s
 The GBA is ROM mode without splat (`consoles/gba/`): luvdis finds its functions and `rom/match_arm.py` judges them,
 so what reads splat's listings or MIPS code doesn't reach it yet. Checked on it: the import, drafts, the judge,
 compiler ranges (agbcp's C++, agbcc's `old_agbcc`) and their range checks, split_function, function-end reports
-(`report_boundary`, cut by halfwords, the rest set aside and still exported), renames, saves and the export. Not yet: twins,
-the autopilot and the permuter (all read a function's code through the shared ROM path, untried on Thumb), the extent
+(`report_boundary`, cut by halfwords, the rest set aside and still exported), renames, saves and the export. The permuter too (18 matches on a GBA game in
+a day); decomp-permuter reads agbcp's `extern "C"` functions and C with macros of its own. Not yet: twins and
+the autopilot (both read a function's code through the shared ROM path, untried on Thumb), the extent
 repair the 1.0.2 GBA code had, reimport (it re-splits with splat), and the compiler map. Each gets its GBA cell in the table above when it's run on a GBA game.
 
 ### How much usage each agent has left

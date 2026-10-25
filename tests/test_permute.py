@@ -291,3 +291,57 @@ def test_a_source_the_project_refuses_is_one_line_in_the_log(tmp_path, caplog, m
     assert caplog.records[-1].exc_info is None
     # the same best attempt is refused every time: its other turns go too
     assert net.store.one("SELECT permuted FROM functions WHERE id=1")["permuted"] == permute.MAX_TURNS
+
+
+M2C_DRAFT = """#ifndef M2C_DEFINES
+#define M2C_DEFINES
+typedef s32 M2C_UNK;
+#define M2C_FIELD(expr, type_ptr, offset) (*(type_ptr)((s8 *)(expr) + (offset)))
+#endif
+
+s32 f(void *arg0) {
+    return M2C_FIELD(M2C_FIELD(arg0, void **, 0), s32 *, 0x7C);
+}
+"""
+
+
+def test_the_sources_own_macros_are_expanded_for_decomp_permuter():
+    """23 of 26 near misses of a GBA game decomp-permuter couldn't read had macros of their own (an agent's
+    `#define W(p,o) ...`, m2c's M2C_FIELD block), and pycparser reads no preprocessor: they only got the simple
+    rewrites. Their macros are expanded now, the arguments' own first, as the preprocessor does."""
+    from decompnet.permuter_gen import own_macros
+
+    out = own_macros(M2C_DRAFT)
+    assert "#" not in out and "M2C_FIELD" not in out and "typedef s32 M2C_UNK;" in out
+    assert "(*(s32 *)((s8 *)((*(void **)((s8 *)(arg0) + (0)))) + (0x7C)))" in out
+    assert own_macros("#ifndef X\n#define X\nint a;\n#endif\n#ifndef X\nint b;\n#endif\n") == "int a;\n"
+    assert own_macros("#define W(n) (p->f##n)\nx = W(6c);\n") == "x = (p->f6c);\n"
+    assert own_macros("#define sp0 frame.points[0]\nsp0 = 1;\n") == "frame.points[0] = 1;\n"
+    for unread in ("#define S(x) #x\n", "#if A > 1\n#endif\n", '#include "x.h"\n'):
+        with pytest.raises(ValueError):
+            own_macros(unread)
+
+
+def test_extern_c_is_read_as_c():
+    """agbcp builds C++, so a C function in an agbcp part is written in `extern "C"` (or every call's name is
+    mangled), which pycparser can't read: read as C, and each variant gets its `extern "C"` back."""
+    from decompnet.permuter_gen import without_extern_c
+
+    assert without_extern_c('extern "C" {\nint g(void);\nint f(void) { if (1) { return g(); } }\n}\n') == (
+        "\nint g(void);\nint f(void) { if (1) { return g(); } }\n\n", True)
+    assert without_extern_c('extern "C" int g(void);\nint f(void) { return g(); }\n') == (
+        "int g(void);\nint f(void) { return g(); }\n", True)
+    assert without_extern_c("int f(void) { return 0; }") == ("int f(void) { return 0; }", False)
+
+
+@needs_tool
+def test_decomp_permuter_writes_variants_of_c_with_its_own_macros_and_extern_c():
+    job = {"header": HEADER + "typedef signed char s8;\n", "source": M2C_DRAFT, "function": "f", "family": "gcc",
+           "seed": 1, "count": 8}
+    gen = permute.Generator()
+    try:
+        assert len(gen.batch(job)) == 8
+        wrapped = gen.batch({**job, "source": 'extern "C" {\n' + SOURCE + "}\n"})
+        assert len(wrapped) == 8 and all(v.startswith('extern "C" {') and v.rstrip().endswith("}") for v in wrapped)
+    finally:
+        gen.close()
