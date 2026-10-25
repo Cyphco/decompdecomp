@@ -361,6 +361,8 @@ class CompilerMixin:
                 state = self.start_survey(slug)
         # checking a part on its neighbours needs only the judge: every ROM project's parts get it (a GBA game's 120
         # parts all said "not checked yet" while it waited behind the compiler map)
+        if ranges and check_now:  # "Check again now": the parts already settled are weighed again too
+            self.rangechecks.reweigh_audits(proj)
         audited = {(tuple(map(tuple, c["spans"])), c["toolchain"]) for c in cfg.get("range_checks", []) if c.get("audit")}
         if ranges and (check_now or any((((r["start"], r["end"]),), r["toolchain"]) not in audited for r in ranges)):
             self.rangechecks.audit(proj)
