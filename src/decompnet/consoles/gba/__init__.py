@@ -2,10 +2,12 @@
 
 splat doesn't read ARM, so the GBA finds its own functions and has its own judge:
 - split.py: the ROM's header, and its functions: luvdis follows the code from the entry point, then passes over
-  what's left find code nothing calls (candidates.py); each function's bytes run to the end of its literal pool.
+  what's left find code nothing calls (candidates.py); each function's bytes run to the end of its literal pool,
+  and its listing ends there too (own_listing; on_start cuts those of projects imported before).
 - candidates.py: function starts luvdis didn't reach (prologues, leaf functions after a return, Thumb pointers).
 - luvdis_run.py: runs luvdis in its own environment, with a fix to its stack emulation.
 - edit.py: split_function: a function luvdis merged into the one before it, or never found, made one of its own.
+  An approved report_boundary cuts the same way, the rest (padding, data) set aside.
 - export.py: the rebuildable tree (luvdis's assembly, the matched C, a linker script with every piece at its
   address); export_build.py is that tree's build.py, which rebuilds the ROM and checks it byte for byte.
 - ../../rom/match_arm.py: the judge: a compiled candidate linked at the function's address (Thumb `bl` pairs,
@@ -22,6 +24,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ...arch import BOUNDARIES
 from ...rom import Picked
 from .. import BETA, EXPORT, ROM, Compiler, Console
 
@@ -36,6 +39,7 @@ class GameBoyAdvance(Console):
     status = BETA  # matched and rebuilt on real games with the 1.0.2 code this is ported from; not yet rebuilt here
     arch = "arm"  # Thumb mostly; the ELF objects say "arm" for both (arch/arm.py)
     big_endian = False
+    code_align = 2  # Thumb
     mode = ROM
     layout = "luvdis"
     compilers = (
@@ -49,7 +53,7 @@ class GameBoyAdvance(Console):
     ram = RAM
     demo = "demo-gba"
     demo_tools = ("agbcc", "arm-gnu", "luvdis")
-    own_features = frozenset({EXPORT})
+    own_features = frozenset({EXPORT, BOUNDARIES})  # (it cuts its functions itself: edit.py)
     as_flags = ("-mcpu=arm7tdmi",)
     image_ext = ".gba"
     splat = False
@@ -91,10 +95,26 @@ class GameBoyAdvance(Console):
 
         return export_gba(net, slug, out, log=log)
 
-    def split_function(self, net, agent, proj, fn, addr: int, new_name: str, syms) -> str:
+    def on_start(self, net, slug: str, log=print) -> None:
+        """A project imported before listings were cut at their function's end (split.own_listing) gets them cut:
+        only the listing agents read changes, never the bytes judged or exported."""
+        from .split import own_listing
+
+        proj = net.project_row(slug)
+        rows = net.store.all("SELECT id, vram, size, asm FROM functions WHERE project_id=? AND vram IS NOT NULL",
+                             proj["id"])
+        cut = [(text, r["id"]) for r in rows if r["asm"] and (text := own_listing(r["asm"], r["vram"] + r["size"])) != r["asm"]]
+        if cut:
+            with net.store.tx() as db:
+                db.executemany("UPDATE functions SET asm=? WHERE id=?", cut)
+                net._event(db, proj["id"], None, "analysis", f"{len(cut)} functions' assembly ends where they end now, "
+                                                           "not in the function after them")
+
+    def split_function(self, net, agent, proj, fn, addr: int, new_name: str, syms,
+                       set_aside: dict | None = None) -> str:
         from .edit import split
 
-        return split(net, agent, proj, fn, addr, new_name, syms)
+        return split(net, agent, proj, fn, addr, new_name, syms, set_aside)
 
     def up_front_guide(self, compiler: str) -> str:
         return "agbcc"

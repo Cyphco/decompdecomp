@@ -134,3 +134,24 @@ def test_a_helper_linked_twice_gets_two_names(tmp_path, monkeypatch):
     names = [r["name"] for r in net.store.all("SELECT name FROM functions WHERE project_id=? ORDER BY vram",
                                               net.project_row(slug)["id"])]
     assert names == ["_call_via_r3", "_call_via_r3_08000300"]
+
+
+def test_a_function_end_report_cuts_padding_and_the_rom_still_rebuilds(tmp_path):
+    """Agents dropped a GBA function saying "boundary-report support appears unavailable". A report on a function
+    whose bytes end in padding now cuts it at its last instruction, the padding set aside, and the export still
+    rebuilds the ROM byte for byte."""
+    net = RomNetwork(tmp_path / "app.db", tmp_path)
+    slug = net.import_rom(ROM, confirmed=True, log=lambda *_: None)
+    pid = net.project_row(slug)["id"]
+    fn = next(f for f in net.store.all("SELECT * FROM functions WHERE project_id=? AND status='open' ORDER BY vram", pid)
+              if f["size"] > 8 and bytes(f["target"])[-2:] == b"\0\0")
+    agent, _ = net.local_agent("gba-agent")
+    end = fn["vram"] + fn["size"] - 2
+    assert net.request_boundary(agent, slug, fn["name"], f"0x{end:08X}", "two bytes of padding").startswith("Reported")
+    (req,) = net.overview(slug)["boundaries"]
+    net.resolve_boundary(slug, req["id"], apply=True)
+    assert net.store.one("SELECT size FROM functions WHERE id=?", fn["id"])["size"] == fn["size"] - 2
+    pad = net.store.one("SELECT status, size FROM functions WHERE project_id=? AND name=?", pid, f"pad_{end:08X}")
+    assert (pad["status"], pad["size"]) == ("asm", 2)
+    out = net.export_rom(slug, log=lambda *_: None)
+    assert out["identical"], out["log"]

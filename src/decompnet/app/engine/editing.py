@@ -85,22 +85,25 @@ class EditMixin:
             raise NetworkError("in a team room the host's project decides where functions end: tell the host (add_note)")
         fn = self._function(function, slug)
         proj = self._project(slug)
-        if arch.BOUNDARIES not in self.console(proj).features:
-            raise NetworkError(f"boundary reports are for MIPS games (N64, PlayStation 2) for now, not {self.console(proj).name}")
+        console = self.console(proj)
+        if arch.BOUNDARIES not in console.features:
+            raise NetworkError(f"boundary reports aren't there for {console.name} games yet")
         if fn["status"] == "matched":
             raise NetworkError(f"{fn['name']} is matched: its boundaries are proven")
         m = _ADDRESS.match(str(end).strip())
         if not m:
             raise NetworkError("`end` must be an address like 0x80001234: where the function's last instruction ends")
         addr = int(m.group(1), 16)
-        off = addr - fn["vram"]
-        if off <= 0 or off >= fn["size"] or off % 4:
-            raise NetworkError(f"0x{addr:08X} isn't a word inside {fn['name']} (0x{fn['vram']:08X}, {fn['size']} bytes)")
+        off, step = addr - fn["vram"], console.code_align  # (a GBA function's Thumb instructions are halfwords)
+        if off <= 0 or off >= fn["size"] or off % step:
+            raise NetworkError(f"0x{addr:08X} isn't an instruction's end inside {fn['name']} (0x{fn['vram']:08X}, "
+                               f"{fn['size']} bytes, instructions of {step})")
         reason = " ".join(reason.split())[:600]
         if not reason:
             raise NetworkError("say what the bytes after it are (padding, linker leftovers, data) and how you can tell")
         order = "big" if proj["big_endian"] else "little"
-        rest = " ".join(f"{int.from_bytes(fn['target'][at:at + 4], order):08X}" for at in range(off, min(fn["size"], off + 32), 4))
+        rest = " ".join(f"{int.from_bytes(fn['target'][at:at + step], order):0{2 * step}X}"
+                        for at in range(off, min(fn["size"], off + 32), step))
 
         def change(cfg):
             items = cfg.setdefault("boundaries", [])
@@ -123,8 +126,11 @@ class EditMixin:
             if fn["vram"] != req["vram"] or not 0 < req["end"] - fn["vram"] < fn["size"] or fn["status"] == "matched":
                 raise NetworkError(f"{fn['name']} changed since it was reported: dismiss this one")
             name = f"pad_{req['end']:08X}"
-            self._cut(proj, fn, req["end"], name, self.symbols(proj["id"]), None, "boundary", f"{fn['name']} ends at 0x{req['end']:08X}",
-                      {"asm_code": f"not code (set aside from {fn['name']}): {req['reason']}"})
+            meta = {"asm_code": f"not code (set aside from {fn['name']}): {req['reason']}"}
+            syms = self.symbols(proj["id"])
+            # a console whose functions aren't splat's cuts them its own way (the GBA's, by halfwords)
+            if self.console(proj).split_function(self, None, proj, fn, req["end"], name, syms, set_aside=meta) is None:
+                self._cut(proj, fn, req["end"], name, syms, None, "boundary", f"{fn['name']} ends at 0x{req['end']:08X}", meta)
         self._update_cfg(slug, lambda cfg: next(r for r in cfg["boundaries"] if r["id"] == rid).__setitem__(
             "status", "applied" if apply else "dismissed"))
 

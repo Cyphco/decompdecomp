@@ -209,7 +209,7 @@ def test_boundary_reports_wait_for_the_user(net):
     fns = net.store.all("SELECT * FROM functions WHERE project_id=? AND status='open' AND size>=16 ORDER BY vram LIMIT 2", pid)
     fn, other = fns[0], fns[1]
     end = fn["vram"] + fn["size"] - 8
-    with pytest.raises(NetworkError, match="isn't a word inside"):
+    with pytest.raises(NetworkError, match="isn't an instruction's end inside"):
         net.request_boundary(agent, slug, fn["name"], f"0x{fn['vram'] + fn['size'] + 4:X}", "padding")
     with pytest.raises(NetworkError, match="say what the bytes"):
         net.request_boundary(agent, slug, fn["name"], f"0x{end:X}", "   ")

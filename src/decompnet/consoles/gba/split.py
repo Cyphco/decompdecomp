@@ -131,6 +131,19 @@ def _asm_blocks(asm: str) -> dict[int, tuple[str, bool]]:
     return out
 
 
+_LABEL = re.compile(r"^(?:_|\.L)([0-9A-F]{8}):", re.M)
+
+
+def own_listing(text: str, end: int) -> str:
+    """A function's listing up to `end` (its address), where its bytes end. luvdis lists a function up to the next
+    one it found itself, so one only the second pass found (code nothing calls) was listed as part of the function
+    before it: agents read the next function's prologue there, took it for part of theirs, and gave up on it."""
+    cut = next((m for m in _LABEL.finditer(text) if int(m.group(1), 16) >= end), None)
+    if cut is None:
+        return text
+    return text[:cut.start()].rstrip() + f"\n@ it ends here, at 0x{end:08X}: what luvdis listed after it is another function's\n"
+
+
 def _refs(code: bytes, addr: int, literals: set[int], off: int) -> list[tuple[int, int, int]]:
     """Calls (Thumb `bl`) and data pointers (literal-pool words holding RAM/ROM addresses) in a function."""
     from ...rom.match_arm import thumb_bl_dest
@@ -186,6 +199,7 @@ def split(rom_path: Path, workdir: Path, log=print) -> list[GbaFunction]:
         off = addr - BASE
         end = extents[addr]
         text, thumb = blocks.get(addr, (f"\tthumb_func_start sub_{addr:08X}\n", True))
+        text = own_listing(text, BASE + end)
         code = rom[off:end]
         out.append(GbaFunction(f"sub_{addr:08X}", addr, off, code, text, max(1, len(code) // 2), thumb,
                                _refs(code, addr, literals, off), call_via(code)))

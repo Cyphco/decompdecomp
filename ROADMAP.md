@@ -31,7 +31,7 @@ folder, `src/decompnet/consoles/<id>/`; a new console adds a column (CONTRIBUTIN
 | Agents' verdict "no C makes this" (3 agents of 2 models: set aside, red in the map) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ |
 | Check again (and before helpers start, once after each update) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓ |
 | Kernel stubs set aside and named | — | set aside (BIOS calls) | ✓ | — | — | — | — | — |
-| Function-end reports (`report_boundary`) | ✓ | ✓ | ✓ | — | — | — | — | — |
+| Function-end reports (`report_boundary`) | ✓ | ✓ | ✓ | — | — | — | ✓ (cut by halfwords) | — |
 | Compiler ranges and suggestions | ✓ | ✓ | ✓ | from scratch: per source file (`try_compiler`, Settings); else the project's build | the project's build | per source file (`try_compiler`, Settings) | ranges (agbcp, `old_agbcc`) | the project's build |
 | Flag search (`search_flags`) | ✓ | ✓ | ✓ | the project's build | the project's build | the project's build | — | the project's build |
 | Compiler map and the judge's survey | ✓ | ✓ | ✓ | — | — | — | — | — |
@@ -55,7 +55,8 @@ Where to start on a gap:
   mode, not on a ROM; the readers are the part to write (CodeWarrior's vtable pointer is often not at offset 0).
 - **Windows PC**: autopilot needs drafts that compile (Ghidra's output doesn't, as it is); the export needs a linker
   story (the project is delinked COFF objects).
-- **Function-end reports** cut MIPS functions (`engine._cut`).
+- **Function-end reports** cut MIPS functions (`engine._cut`) and GBA ones (the console's own cut,
+  `Console.split_function` with `set_aside`); a ROM console that cuts its own functions gets them that way.
 - **Struct layouts** read MIPS loads and stores (`arch/mips_fields.py`); another processor adds its reader as its
   `Arch.field_accesses`, and structs.py does the rest. Still open on MIPS: the PS2's fifth to eighth arguments
   (t0-t3), and a pointer into the middle of a struct handed to a callee (`&this->pos`).
@@ -270,10 +271,10 @@ go back to the queue with their old attempts as notes. Each improvement to the s
 
 The GBA is ROM mode without splat (`consoles/gba/`): luvdis finds its functions and `rom/match_arm.py` judges them,
 so what reads splat's listings or MIPS code doesn't reach it yet. Checked on it: the import, drafts, the judge,
-compiler ranges (agbcp's C++, agbcc's `old_agbcc`) and their range checks, split_function, renames, saves and the export. Not yet: twins,
-the autopilot and the permuter (all read a function's code through the shared ROM path, untried on Thumb), function-end
-reports and the extent repair the 1.0.2 GBA code had (`report_boundary`, cut by halfwords), reimport (it re-splits with
-splat), and the compiler map. Each gets its GBA cell in the table above when it's run on a GBA game.
+compiler ranges (agbcp's C++, agbcc's `old_agbcc`) and their range checks, split_function, function-end reports
+(`report_boundary`, cut by halfwords, the rest set aside and still exported), renames, saves and the export. Not yet: twins,
+the autopilot and the permuter (all read a function's code through the shared ROM path, untried on Thumb), the extent
+repair the 1.0.2 GBA code had, reimport (it re-splits with splat), and the compiler map. Each gets its GBA cell in the table above when it's run on a GBA game.
 
 ### How much usage each agent has left
 

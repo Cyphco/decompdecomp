@@ -1,5 +1,6 @@
 """split_function on a GBA game: luvdis merges a function into the one before it (code after an early return, a
-function nothing calls) or never finds it, and an agent who reads the assembly says where it starts.
+function nothing calls) or never finds it, and an agent who reads the assembly says where it starts. An approved
+report_boundary cuts the same way and sets the rest aside: padding or data after the function's last instruction.
 
 A GBA function is its bytes as the ROM has them, with its literal pool, and luvdis's listing of it (not splat's
 lines), so it's cut by bytes and by that listing's labels; code after the last function nobody found becomes a
@@ -17,10 +18,11 @@ from . import candidates
 from .split import BASE, _refs
 
 
-def split(net, agent, proj, fn, addr: int, new_name: str, syms) -> str:
-    """Cut a GBA function's bytes and assembly in two at `addr` (Thumb: a halfword boundary)."""
+def split(net, agent, proj, fn, addr: int, new_name: str, syms, set_aside: dict | None = None) -> str:
+    """Cut a GBA function's bytes and assembly in two at `addr` (Thumb: a halfword boundary). `set_aside`: the rest
+    isn't code (report_boundary, approved by the user: no agent), so it's set aside with that meta."""
     off = addr - fn["vram"]
-    if off >= fn["size"] and off % 2 == 0:  # code after the function that nobody found yet: make it a function
+    if off >= fn["size"] and off % 2 == 0 and set_aside is None:  # code after the function nobody found: a function
         return _add(net, agent, proj, fn, addr, new_name, syms)
     if off <= 0 or off >= fn["size"] or off % 2:
         raise NetworkError(f"0x{addr:08X} isn't inside {fn['name']} (0x{fn['vram']:08X}, {fn['size']} bytes)")
@@ -35,14 +37,18 @@ def split(net, agent, proj, fn, addr: int, new_name: str, syms) -> str:
     with net.store.tx() as db:
         db.execute("UPDATE functions SET size=?, n_insns=?, target=?, relocs=?, asm=?, seed=NULL, best_score=NULL "
                    "WHERE id=?", (len(head), max(1, len(head) // 2), head, json.dumps(refs_head), asm_head, fn["id"]))
-        db.execute("INSERT INTO functions(project_id,name,size,n_insns,target,relocs,asm,seed,unit,vram,rom_offset) "
-                   "VALUES(?,?,?,?,?,?,?,?,?,?,?)", (proj["id"], new_name, len(tail), max(1, len(tail) // 2), tail,
-                                                    json.dumps(refs_tail), asm_tail, None, fn["unit"], addr,
-                                                    fn["rom_offset"] + off))
+        db.execute("INSERT INTO functions(project_id,name,size,n_insns,target,relocs,asm,seed,unit,vram,rom_offset,"
+                   "status,meta) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                   (proj["id"], new_name, len(tail), max(1, len(tail) // 2), tail, json.dumps(refs_tail), asm_tail,
+                    None, fn["unit"], addr, fn["rom_offset"] + off, "asm" if set_aside else "open",
+                    json.dumps(set_aside) if set_aside else None))
         db.execute("UPDATE symbols SET size=? WHERE project_id=? AND name=?", (len(head), proj["id"], fn["name"]))
         db.execute("INSERT OR REPLACE INTO symbols(project_id,name,address,size,kind) VALUES(?,?,?,?,?)",
                    (proj["id"], new_name, addr, len(tail), "func"))
-        net._event(db, proj["id"], agent.id, "split", f"{fn['name']} / {new_name}")
+        if set_aside:
+            net._event(db, proj["id"], None, "boundary", f"{fn['name']} ends at 0x{addr:08X}")
+        else:
+            net._event(db, proj["id"], agent.id, "split", f"{fn['name']} / {new_name}")
     net._xrefs.pop(proj["id"], None)
     net._ops.pop(proj["id"], None)
     return (f"✅ split: {fn['name']} is now {len(head)} bytes; {new_name} at 0x{addr:08X} has {len(tail)}. "

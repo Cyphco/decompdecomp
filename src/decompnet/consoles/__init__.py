@@ -61,6 +61,7 @@ class Console:
     status = PUBLIC  # RECOMMENDED, BETA or PUBLIC
     arch = ""  # its processor, an id in arch/ ("mips")
     big_endian = False
+    code_align = 4  # the size its functions' instructions come in, where one may end (report_boundary): Thumb's 2
     mode = ""  # ROM, PROJECT, or "" (only public decomps)
     layout = ""  # what a game started from scratch becomes, for the GUI: "splat", "dtk-template"
     compilers: tuple[Compiler, ...] = ()  # the first is the default, unless default_compiler says another
@@ -162,9 +163,11 @@ class Console:
         ...}), when its functions aren't splat's; None: the shared export (rom/export.py, from splat's config)."""
         return None
 
-    def split_function(self, net, agent, proj, fn, addr: int, new_name: str, syms) -> str | None:
+    def split_function(self, net, agent, proj, fn, addr: int, new_name: str, syms,
+                       set_aside: dict | None = None) -> str | None:
         """ROM mode, split_function: cut function `fn` at `addr`, the rest becoming `new_name`, when its functions
         aren't splat's (their bytes and listing kept as the console's own reader made them); what to tell the agent.
+        `set_aside`: the rest isn't code (an approved report_boundary, agent None): it's set aside with this meta.
         None: the shared cut (splat's listing, editing.py)."""
         return None
 
