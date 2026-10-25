@@ -380,21 +380,24 @@ def test_decomp_permuter_writes_variants_of_c_with_its_own_macros_and_extern_c()
         gen.close()
 
 
-def test_c_decomp_permuter_reads_now_gets_its_turns_again_once():
-    """A GBA game's 21 near misses with macros of their own had used all their turns on the simple rewrites: once
-    decomp-permuter reads them, they get their turns again, once per project; C it read before keeps its count."""
+def test_near_misses_that_used_their_turns_get_one_fresh_round():
+    """A GBA game's 21 near misses with macros of their own had used all their turns on the simple rewrites, and
+    then all 129 of its near misses had used theirs on bests hours old: what a newer READER gives turns for, a
+    project gets once, as one fresh round for its open near misses; a matched function and a version later, none."""
     net = FakeNet()
     with net.store.tx() as db:
         db.execute("UPDATE functions SET permuted=?, best_source=? WHERE id=1",
                    (MAX_TURNS, "#define W(p) (*(s32 *)(p))\n" + SOURCE))
         db.execute("INSERT INTO functions(id, project_id, name, n_insns, best_score, best_source, permuted) "
                    "VALUES(2, 1, 'g', 10, 40, ?, ?)", (SOURCE, MAX_TURNS))
-        db.execute("INSERT INTO functions(id, project_id, name, n_insns, best_score, best_source, permuted) "
-                   "VALUES(3, 1, 'h', 10, 40, 'extern \"C\" { int h(void) { return 0; } }', ?)", (MAX_TURNS,))
+        db.execute("INSERT INTO functions(id, project_id, name, n_insns, best_score, best_source, permuted, status) "
+                   "VALUES(3, 1, 'h', 10, 0, ?, ?, 'matched')", (SOURCE, MAX_TURNS))
+        db.execute("UPDATE projects SET config=json_set(config, '$.permuter_reader', 2)")  # (read by version 2)
     p = Permuter(net)
     assert p.fresh_turns("game") == 2
     turns = {r["name"]: r["permuted"] for r in net.store.all("SELECT name, permuted FROM functions")}
-    assert turns == {"f": 0, "g": MAX_TURNS, "h": 0}
+    assert turns == {"f": 0, "g": 0, "h": MAX_TURNS}
+    assert net.cfg(net.project_row("game"))["permuter_reader"] == permute.READER
     with net.store.tx() as db:
         db.execute("UPDATE functions SET permuted=?", (MAX_TURNS,))
     assert p.fresh_turns("game") == 0  # (once)

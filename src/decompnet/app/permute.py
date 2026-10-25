@@ -25,7 +25,6 @@ import json
 import logging
 import queue
 import random
-import re
 import subprocess
 import threading
 import time
@@ -57,11 +56,11 @@ IDLE_SECONDS = 180  # with no near misses, how long until the permuter looks aga
 IDLE_LOOKS = 20  # looks in a row with nothing to do (an hour) and it's done until agents start again
 HOLD_SPARE_SECONDS = 120  # a turn's hold on a function lasts this much longer than the turn, in case it runs over
 _EOF = object()
-# What decomp-permuter reads (permuter_gen.py), by version: 2 = C with its own macros and agbcp's extern "C". A
-# project last permuted by an older reader gives the functions it couldn't read their turns again (fresh_turns):
-# a GBA game's 21 such near misses had used all theirs on the simple rewrites
-READER = 2
-NEWLY_READ = re.compile(r'^[ \t]*#[ \t]*(?:define|ifn?def)\b|\bextern\s*"C"', re.M)
+# What gives a near miss its permuter turns again, by version: a project last permuted by an older one gives its
+# open near misses one fresh round (fresh_turns). 2: decomp-permuter reads C with its own macros and agbcp's
+# extern "C" (permuter_gen.py; a GBA game's 21 such near misses had used all theirs on the simple rewrites). 3: an
+# agent's new best gives turns back (Network._record); that game's 129 near misses had used theirs on older bests
+READER = 3
 # decomp-permuter's weights per compiler (its default_weights.toml), by the start of a toolchain's id
 FAMILIES = (("ido", "ido"), ("gcc", "gcc"), ("ee-gcc", "gcc"), ("psp-gcc", "gcc"), ("mwc", "mwcc"))
 
@@ -209,19 +208,18 @@ class Permuter:
             proj["id"], NEAR, MAX_INSNS, MAX_TURNS, limit)
 
     def fresh_turns(self, slug: str) -> int:
-        """Turns again for the open near misses an older decomp-permuter reader couldn't read (READER), once per
+        """One fresh round of turns for the open near misses that used theirs before what READER says, once per
         project. How many."""
         proj = self.net.project_row(slug)
         if (self.net.cfg(proj).get("permuter_reader") or 1) >= READER:
             return 0
-        ids = [r["id"] for r in self.net.store.all("SELECT id, best_source FROM functions WHERE project_id=? AND "
-                                                    "status='open' AND permuted > 0 AND best_source IS NOT NULL",
-                                                    proj["id"]) if NEWLY_READ.search(r["best_source"])]
+        ids = [r["id"] for r in self.net.store.all("SELECT id FROM functions WHERE project_id=? AND status='open' AND "
+                                                    "permuted > 0 AND best_source IS NOT NULL", proj["id"])]
         with self.net.store.tx() as db:
             db.executemany("UPDATE functions SET permuted=0 WHERE id=?", [(i,) for i in ids])
         self.net._update_cfg(slug, lambda cfg: cfg.__setitem__("permuter_reader", READER))
         if ids:
-            log.info("permuter: %d functions of %s get their turns again: decomp-permuter reads their C now", len(ids), slug)
+            log.info("permuter: %d near misses of %s get a fresh round of turns", len(ids), slug)
         return len(ids)
 
     def _loop(self, slug: str, st: State) -> None:
