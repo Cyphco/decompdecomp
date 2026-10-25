@@ -59,7 +59,7 @@ def test_ids_are_unique_and_public_decomps_have_their_guides():
     ids = [key for c in consoles.CONSOLES for key in (c.id, *c.aliases)]
     assert len(ids) == len(set(ids))
     assert all(_guide_exists(t) for c in consoles.CONSOLES for t in (*c.guides, c.compiler_guide) if t)
-    assert {c.id for c in consoles.CONSOLES if c.status == consoles.PUBLIC} >= {"psp", "3ds"}  # forks only
+    assert {c.id for c in consoles.CONSOLES if c.status == consoles.PUBLIC} >= {"3ds", "switch"}  # forks only
 
 
 def test_the_ids_older_projects_stored_still_open_them(tmp_path):
@@ -89,6 +89,17 @@ def test_an_unknown_platform_is_a_console_with_only_its_name():
 def test_a_file_no_console_reads_says_which_ones_do():
     with pytest.raises(RomError, match="Nintendo 64.*PlayStation 2.*Windows PC"):
         consoles.identify(bytes(4096))
+
+
+def test_a_psp_cso_is_not_taken_for_a_gamecube_disc():
+    """Both start with CISO: a GameCube/Wii CISO goes on with its block size, a PSP .cso with its header's size."""
+    from decompnet.consoles.gc_wii import scratch
+
+    gc_ciso = b"CISO" + struct.pack("<I", 0x200000) + b"\x01\x01\x00" + bytes(0x100)
+    psp_cso = b"CISO" + struct.pack("<IQIBB", 0x18, 0x4000000, 0x800, 1, 0) + bytes(0x100)
+    assert scratch.disc_kind(gc_ciso) == "packed"
+    assert scratch.disc_kind(psp_cso) is None
+    assert consoles.identify(gc_ciso) is consoles.get("gc")
 
 
 def test_mips_code_in_a_forks_object_isnt_judged_without_its_console():

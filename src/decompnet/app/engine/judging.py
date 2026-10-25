@@ -28,9 +28,13 @@ class JudgeMixin:
 
     def _target_obj(self, fn, proj):
         if not self.is_rom(proj):
-            return super()._target_obj(fn, proj)
-        own = self.console(proj).rom_target_obj(fn)  # a console with a judge of its own (the GBA's)
-        return own if own is not None else match.canonical_target(self._rom_target(fn), self.symbols(proj["id"]))
+            obj = super()._target_obj(fn, proj)
+        else:
+            obj = self.console(proj).rom_target_obj(fn)  # a console with a judge of its own (the GBA's)
+            if obj is None:
+                obj = match.canonical_target(self._rom_target(fn), self.symbols(proj["id"]))
+        obj.cpu = self.console(proj).cpu_variant  # the diff reads a PSP's VFPU with its own reader (arch/)
+        return obj
 
     def _evaluate(self, fn, proj, obj: bytes):
         if not self.is_rom(proj):

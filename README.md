@@ -169,11 +169,12 @@ game's code is its rights holder's: keep it to yourself.
 | Nintendo 64 | Recommended |
 | PlayStation (PS1) | Beta |
 | PlayStation 2 | Beta |
+| PSP | Beta |
 | GameCube, Wii | Beta |
 | Windows PC games | Beta |
 | Nintendo DS | Beta |
 | Game Boy Advance | Beta |
-| 3DS, PSP, Switch, Xbox, Xbox 360 | Community decomps only |
+| 3DS, Switch, Xbox, Xbox 360 | Community decomps only |
 
 1.0.3 rewrote most of the app, so every platform needs testing again, Nintendo 64 too. Try it on a game you own and
 [tell us how it went](https://github.com/n-delic/decompdecomp/issues): what worked, what didn't, what was confusing. Reports are how a platform goes

@@ -63,7 +63,7 @@ _EOF = object()
 READER = 2
 NEWLY_READ = re.compile(r'^[ \t]*#[ \t]*(?:define|ifn?def)\b|\bextern\s*"C"', re.M)
 # decomp-permuter's weights per compiler (its default_weights.toml), by the start of a toolchain's id
-FAMILIES = (("ido", "ido"), ("gcc", "gcc"), ("ee-gcc", "gcc"), ("mwc", "mwcc"))
+FAMILIES = (("ido", "ido"), ("gcc", "gcc"), ("ee-gcc", "gcc"), ("psp-gcc", "gcc"), ("mwc", "mwcc"))
 
 
 def weight_family(cfg: dict, vram: int | None, fork: bool) -> str:

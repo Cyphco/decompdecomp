@@ -17,12 +17,13 @@ each the function alone plus whatever the randomizer added beside it (a helper i
 is open, so a header is parsed once per C a turn starts from: a second for a header of 300 KB.
 
 decomp-permuter reads C through pycparser, which knows neither comments nor the preprocessor: comments go, and so
-do the header's preprocessor lines (as for m2c's context, seeds.py). Its macros stay undefined here, which is fine
-while the code only names them (GRAVITY): the compiler still gets the header whole. The source's own macros are
-expanded (own_macros): agents keep helpers as macros, and m2c's drafts bring their M2C_FIELD block, so 23 of 26
-near misses of a GBA game it couldn't read had them. C++ that's only C in `extern "C"` (agbcp's functions) is read
-as C, each variant wrapped in `extern "C"` again. What still doesn't parse (a class, `__attribute__`) falls back
-to the simple rewrites (permuter.py).
+do the header's preprocessor lines (as for m2c's context, seeds.py), and the source's, which each variant gets back
+at its top. Macros stay undefined here, which is fine while the code only names them (GRAVITY) or calls them like
+a function: the compiler still gets them. A macro call pycparser can't read as C (a type as an argument:
+M2C_FIELD(p, s32 *, 4)) is read with the source's own macros expanded instead (own_macros), the variants then
+without them: 23 of 26 near misses of a GBA game it couldn't read had macros of their own. C++ that's only C in
+`extern "C"` (agbcp's functions) is read as C, each variant wrapped in `extern "C"` again. What still doesn't parse
+(a class, `__attribute__`) falls back to the simple rewrites (permuter.py).
 
 The walk is decomp-permuter's own: a variant is the last one rewritten once more (KEEP of the time) or the source
 rewritten afresh, so variants drift a few rewrites away from the source and come back.
@@ -177,19 +178,31 @@ def main() -> int:
 
     def variants(job: dict):
         name, count = job["function"], int(job["count"])
+        # the source's own preprocessor lines (autopilot's drafts start with m2c's macros, seeds.M2C_MACROS) go too,
+        # and back in front of each variant for the compiler: kept in, no draft ever parsed (#ifndef M2C_DEFINES)
         source, wrapped = without_extern_c(plain_c(job["source"]))
-        try:
-            source = own_macros(source)
-        except ValueError as e:
-            yield {"error": f"ValueError: {e}"}
-            return
-        unit = f"{plain_c(job['header'], directives=False)}\ntypedef int {SOURCE_STARTS};\n{source}\n"
+        directives = "".join(line + "\n" for line in source.splitlines() if line.lstrip().startswith("#"))
+        top = f"{plain_c(job['header'], directives=False)}\ntypedef int {SOURCE_STARTS};\n"
+        units = [(f"{top}{plain_c(source, directives=False)}\n", directives)]
+        if directives:  # then, where a macro call isn't C pycparser reads, with the source's own macros expanded
+            try:
+                units.append((f"{top}{own_macros(source)}\n", ""))
+            except ValueError:
+                pass
         rng = random.Random(job["seed"])
+        first = error = None
         try:
             weights = get_default_randomization_weights(job.get("family") or "base")
-            first = Candidate.from_source(unit, EvalState(), name, weights, rng.randrange(1, MAX_SEED))
-        except Exception as e:  # the C or the header isn't C pycparser reads (a macro call, a compiler extension)
-            yield {"error": f"{type(e).__name__}: {e}"}
+        except Exception as e:
+            units, error = [], e
+        for unit, prefix in units:
+            try:
+                first = Candidate.from_source(unit, EvalState(), name, weights, rng.randrange(1, MAX_SEED))
+                break
+            except Exception as e:  # the C or the header isn't C pycparser reads (a macro call, a compiler extension)
+                error = e
+        if first is None:
+            yield {"error": f"{type(error).__name__}: {error}"}
             return
         seam = next(node for node in first.ast.ext if isinstance(node, c_ast.Typedef) and node.name == SOURCE_STARTS)
 
@@ -214,7 +227,7 @@ def main() -> int:
                 continue
             if variant not in seen:
                 seen.add(variant)
-                yield {"variant": f'extern "C" {{\n{variant}}}\n' if wrapped else variant}
+                yield {"variant": prefix + (f'extern "C" {{\n{variant}}}\n' if wrapped else variant)}
 
     for line in sys.stdin:
         if line.strip():
