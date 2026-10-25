@@ -2,7 +2,12 @@
 
 agbcc is pret's rebuild of the GCC 2.95-era compiler most Game Boy Advance games used. The same release has
 `old_agbcc` for some early games and `agbcc_arm` for ARM code. Typical flags are `-mthumb-interwork -O2`; the
-project sets them, and every function is judged with them.
+project sets them, and every function is judged with them. `try_compiler(function, "old_agbcc")` builds C with the
+older snapshot, and `suggest(compiler="old_agbcc", ...)` suggests it for a range; flags go in `flags` as usual
+(`-mthumb-interwork -O2 -mlong-calls`).
+
+C89, not C99: every local is declared at the top of its block, before any statement (no declarations after code,
+no `for (int i = 0; ...)`). Otherwise the compiler only says "syntax error before `x'" and nothing compiles.
 
 What moves the output
 - Local declaration order and first use change register allocation. Reorder before rewriting.
