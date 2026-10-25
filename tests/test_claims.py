@@ -501,3 +501,39 @@ def test_a_function_pieces_were_joined_to_is_open_again_but_library_code_stays_a
         db.execute("UPDATE functions SET status='asm', meta=?", (json.dumps({"asm_code": "libc", "set_aside": True}),))
     net.joined("piece", "game")
     assert net.store.one("SELECT status FROM functions")["status"] == "asm"
+
+
+def test_a_release_can_make_c_that_does_what_the_game_does_the_start(tmp_path, monkeypatch):
+    """A GBA game's best attempt passed the new record where the game passes the old handle; another's compared a
+    pointer's low halfword. They scored lowest, so every next agent started from C that does something else. A
+    release's start_from is judged and kept as the best attempt, worse score and all; the old C stays an attempt."""
+    import pytest
+
+    net = _one_function_game(tmp_path)
+    agent, _ = net.local_agent("claude-opus-1")
+    with net.store.tx() as db:
+        db.execute("UPDATE functions SET best_score=596, best_source='wrong' WHERE name='piece'")
+    judged = []
+
+    def attempt(agent, function, source, project=None):
+        judged.append(source)
+        score = {"right": 676, "broken": None, "exact": 0}[source]
+        if score == 0:
+            with net.store.tx() as db:
+                db.execute("UPDATE functions SET status='matched', best_score=0 WHERE name='piece'")
+                db.execute("DELETE FROM claims")
+        return {"score": score, "matched": score == 0, "text": "✅ MATCH" if score == 0 else f"score {score}"}
+    monkeypatch.setattr(net, "attempt", attempt)
+    net.claim_row(agent, "game", "piece")
+    with pytest.raises(network.NetworkError, match="doesn't compile, so nothing was released"):
+        net.release_function(agent, "piece", "tried", "game", start_from="broken")
+    assert net.store.one("SELECT COUNT(*) AS n FROM claims")["n"] == 1  # still held
+    said = net.release_function(agent, "piece", "the 596 C truncates the pointer", "game", start_from="right")
+    assert said.startswith("Released piece")
+    fn = net.store.one("SELECT * FROM functions WHERE name='piece'")
+    assert (fn["best_score"], fn["best_source"], fn["best_agent_id"]) == (676, "right", agent.id)
+    note = net.store.one("SELECT text FROM notes ORDER BY id DESC LIMIT 1")["text"]
+    assert note.startswith("the 596 C truncates the pointer") and "score 676" in note
+    assert net.store.one("SELECT detail FROM events WHERE kind='start_from'")["detail"].endswith("the best was 596)")
+    net.claim_row(agent, "game", "piece")  # (C that matches: a match, nothing to release)
+    assert net.release_function(agent, "piece", "", "game", start_from="exact") == "✅ MATCH"
