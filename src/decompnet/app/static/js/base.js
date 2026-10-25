@@ -305,6 +305,7 @@ function show(view) {
 }
 function leaveProject() {
   stopPolling();
+  clearTimeout(S.answerTimer);  // the compiler answer's: it asks again only for the project it was asked for
   S.gen++;  // what its polls bring back now is dropped
   S.slug = null;
   clearInterval(teamTimer);

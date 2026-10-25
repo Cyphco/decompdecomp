@@ -354,21 +354,24 @@ class CompilerMixin:
         ranges = cfg.get("compiler_ranges", [])
         cmap = self.compiler_map(proj)  # None: not MIPS code (no map, no survey)
         state = self.surveys.get(slug) or {}
-        if cmap is not None:
+        if cmap is not None:  # the survey reads the compiler map (MIPS)
             last = cfg.get("compiler_survey") or {}
             several = len({main} | {(r["toolchain"], tuple(r["flags"])) for r in ranges}) > 1  # (one compiler: nothing to try)
             if several and state.get("state") != "running" and (check_now or time.time() - (last.get("t") or 0) > self.SURVEY_AGAIN_SECONDS):
                 state = self.start_survey(slug)
-            audited = {(tuple(map(tuple, c["spans"])), c["toolchain"]) for c in cfg.get("range_checks", []) if c.get("audit")}
-            if ranges and (check_now or any((((r["start"], r["end"]),), r["toolchain"]) not in audited for r in ranges)):
-                self.rangechecks.audit(proj)
-                cfg = self.cfg(self._project(slug))
+        # checking a part on its neighbours needs only the judge: every ROM project's parts get it (a GBA game's 120
+        # parts all said "not checked yet" while it waited behind the compiler map)
+        audited = {(tuple(map(tuple, c["spans"])), c["toolchain"]) for c in cfg.get("range_checks", []) if c.get("audit")}
+        if ranges and (check_now or any((((r["start"], r["end"]),), r["toolchain"]) not in audited for r in ranges)):
+            self.rangechecks.audit(proj)
+            cfg = self.cfg(self._project(slug))
         checks = cfg.get("range_checks", [])
         audits = {tuple(map(tuple, c["spans"])): c for c in checks if c.get("audit")}
         parts = []
         for r in ranges:
             c = audits.get(((r["start"], r["end"]),)) or {}
-            parts.append({"start": r["start"], "end": r["end"], "compiler": consoles.compiler_name(r["toolchain"]),
+            name = consoles.compiler_name(r["toolchain"]) + (f" ({r['variant']})" if r.get("variant") else "")
+            parts.append({"start": r["start"], "end": r["end"], "compiler": name,
                           "flags": " ".join(r["flags"]),
                           "check": c.get("status", ""), "said": c.get("said", "")})
         elsewhere = sorted((r for r in (cmap.runs if cmap else []) if r.differs()), key=lambda r: -r.functions)
@@ -579,7 +582,8 @@ class CompilerMixin:
             if fn is None or fn["status"] != "matched":
                 continue
             own = compiler_for(cfg, fn["vram"])
-            _, d, _ = self._judge_with(proj, fn, own["toolchain"], list(own["flags"]), fn["matched_source"] or "")
+            _, d, _ = self._judge_with(proj, fn, own["toolchain"], list(own["flags"]), fn["matched_source"] or "",
+                                       own.get("variant"))
             with self.store.tx() as db:
                 db.execute("UPDATE functions SET status='open', best_source=matched_source, best_agent_id=matched_agent_id, "
                            "best_score=?, matched_source=NULL, matched_agent_id=NULL, matched_at=NULL WHERE id=?",

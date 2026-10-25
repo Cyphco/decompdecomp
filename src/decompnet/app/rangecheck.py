@@ -145,8 +145,9 @@ class RangeChecks:
         return [copy.deepcopy(c) for c in self.net.cfg(proj).get("range_checks", []) if c["status"] in OPEN]
 
     def _judged(self, proj, fn, label, source: str) -> bool:
-        """The judge's verdict on C built with a compiler, remembered by the C's hash: a recheck after every match
-        asked the same questions again, two compiles for each neighbour. A new header version asks again."""
+        """The judge's verdict on C built with a compiler (toolchain, flags, variant), remembered by the C's hash: a
+        recheck after every match asked the same questions again, two compiles for each neighbour. A new header
+        version asks again."""
         ctx = self.net._context(proj["id"], fn["unit"])
         # shortcut: a renamed symbol can change what C links to, and a remembered verdict doesn't see it until the
         # app restarts; key verdicts by the symbols' version too if a check ever goes wrong that way
@@ -155,37 +156,44 @@ class RangeChecks:
         if key not in self._verdicts:
             if len(self._verdicts) >= VERDICTS_KEPT:
                 self._verdicts.pop(next(iter(self._verdicts)))  # the oldest
-            self._verdicts[key] = self.net._judge_with(proj, fn, label[0], list(label[1]), source)[0]
+            variant = {"variant": label[2]} if label[2] else {}
+            self._verdicts[key] = self.net._judge_with(proj, fn, label[0], list(label[1]), source, **variant)[0]
         return self._verdicts[key]
 
-    def _classify(self, proj, cfg, fn, label, cmap, survey: dict, source: str | None = None) -> str:
-        """One function's verdict on "built by `label`" (see the module's docstring)."""
+    def _classify(self, proj, cfg, fn, label, cmap, survey: dict, source: str | None = None,
+                  variant: str | None = None) -> str:
+        """One function's verdict on "built by `label`" (with `variant`, another binary of its toolchain: agbcc's
+        old_agbcc), see the module's docstring."""
         if (fn["n_insns"] or 0) < MIN_INSNS:
             return "neutral"
         own = compiler_for(cfg, fn["vram"])
-        built = (own["toolchain"], tuple(own["flags"]))  # what it's built with now (and matched with, if it is)
+        # what it's built with now (and matched with, if it is), and the range's compiler, each with its variant: a
+        # GBA game's old_agbcc parts are agbcc with the same flags, and judged as agbcc they said nothing
+        built = (own["toolchain"], tuple(own["flags"]), own.get("variant"))
+        mine = (*label, variant)
         kind = compilermap.kind(label)
         # the other side of the question: today's compiler, or the game's own where the range already applies. Whole
         # labels, flags and all: by kind, IDO -O1 or -framepointer was the same as an IDO -O2 game's compiler, and 85
         # suggestions on an N64 game were dismissed without a compile, functions that match only with them included
-        other = built if built != label else (cfg["compiler"]["toolchain"], tuple(cfg["compiler"]["flags"]))
-        if other == label:
+        game = cfg["compiler"]
+        other = built if built != mine else (game["toolchain"], tuple(game["flags"]), game.get("variant"))
+        if other == mine:
             return "neutral"  # the range's compiler is the game's: nothing to tell apart
         fn = self.net.store.one(f"SELECT {JUDGE_COLUMNS} FROM functions WHERE id=?", fn["id"]) or fn
         if cmap is not None and fn["target"] and cmap.never.get(kind) and (
                 set(cmap.never[kind]) & set(compilermap.quirks(fn["target"], bool(cfg.get("big_endian", True))))):
             return "refuted"
         said = survey.get(str(fn["vram"]))
-        if said:
-            return "confirmed" if (said[0], tuple(said[1])) == label else "refuted"
+        if said:  # (the survey tries compilers without their variants)
+            return "confirmed" if (said[0], tuple(said[1]), None) == mine else "refuted"
         judge = lambda lab, src: self._judged(proj, fn, lab, src)  # noqa: E731
         if fn["status"] == "matched" and fn["matched_source"]:  # it matches with what it's built with: try the other
             src = fn["matched_source"]
-            if built == label:
+            if built == mine:
                 return "neutral" if judge(other, src) else "confirmed"
-            return "neutral" if judge(label, src) else "refuted"
+            return "neutral" if judge(mine, src) else "refuted"
         src = source or self.net._source_of(fn)
-        if not src or not judge(label, src):
+        if not src or not judge(mine, src):
             return "unknown"
         return "neutral" if judge(other, src) else "confirmed"
 
@@ -256,13 +264,13 @@ class RangeChecks:
             key = str(r["vram"])
             if evidence.get(key) in ("confirmed", "refuted"):
                 return evidence[key]
-            evidence[key] = self._classify(proj, cfg, r, label, cmap, survey)
+            evidence[key] = self._classify(proj, cfg, r, label, cmap, survey, variant=c.get("variant"))
             if evidence[key] == "unknown" and key in c["given_up"]:
                 return "neutral"  # an agent gave up on it: no evidence either way, the walk goes past it
             return evidence[key]
         origin = rows[o]
         if c["origin"] in at:
-            v = self._classify(proj, cfg, origin, label, cmap, survey, c.get("origin_source"))
+            v = self._classify(proj, cfg, origin, label, cmap, survey, c.get("origin_source"), c.get("variant"))
             short = (origin["n_insns"] or 0) < MIN_INSNS  # too short to tell anything: its neighbours decide
             if v == "neutral" and not short:  # its own C matches with today's compiler too: no evidence at all
                 return self._finish(proj, c, rows, "quirk", origin["vram"], origin["vram"] + origin["size"], evidence,
@@ -394,10 +402,11 @@ class RangeChecks:
         if not matched or (fn["n_insns"] or 0) < MIN_INSNS:
             return
         for c in self._open(proj):
-            if c["toolchain"] == toolchain and c["flags"] == list(flags):
+            if c["toolchain"] == toolchain and c["flags"] == list(flags) and not c.get("variant"):  # (try_compiler: none)
                 cfg = self.net.cfg(proj)
                 own = compiler_for(cfg, fn["vram"])
-                if not self.net._judge_with(proj, fn, own["toolchain"], list(own["flags"]), source)[0]:
+                variant = {"variant": own["variant"]} if own.get("variant") else {}
+                if not self.net._judge_with(proj, fn, own["toolchain"], list(own["flags"]), source, **variant)[0]:
                     c["evidence"][str(fn["vram"])] = "confirmed"
                     c["status"] = "checking"
                     self._save(proj, c, f"{fn['name']} matches with it")
@@ -423,6 +432,7 @@ class RangeChecks:
                 if (((r["start"], r["end"]),), r["toolchain"]) not in known:
                     items.append({"id": max((c["id"] for c in items), default=0) + 1, "suggestion": None, "audit": True,
                                   "toolchain": r["toolchain"], "flags": list(r["flags"]), "origin": None,
+                                  **({"variant": r["variant"]} if r.get("variant") else {}),
                                   "spans": [[r["start"], r["end"]]], "status": "checking", "evidence": {}, "tasks": [],
                                   "given_up": [], "range": None, "t": time.time()})
                     added.append(1)

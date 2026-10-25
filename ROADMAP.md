@@ -35,7 +35,7 @@ folder, `src/decompnet/consoles/<id>/`; a new console adds a column (CONTRIBUTIN
 | Compiler ranges and suggestions | ✓ | ✓ | ✓ | from scratch: per source file (`try_compiler`, Settings); else the project's build | the project's build | per source file (`try_compiler`, Settings) | ranges (agbcp, `old_agbcc`) | the project's build |
 | Flag search (`search_flags`) | ✓ | ✓ | ✓ | the project's build | the project's build | the project's build | — | the project's build |
 | Compiler map and the judge's survey | ✓ | ✓ | ✓ | — | — | — | — | — |
-| Range checks: a range applies after its neighbours confirm it | ✓ | ✓ | ✓ | — | — | — | — | — |
+| Range checks: a range applies after its neighbours confirm it | ✓ | ✓ | ✓ | — | — | — | ✓ (with its `old_agbcc` variant) | — |
 | C++ classes from the code (`get_class`) | ✓ | ✓ | ✓ | — | — | — | — | — |
 | Struct layouts from loads and stores (`guess_struct`) | ✓ | ✓ | ✓ | — | — | — | — | — |
 | The game's own debug symbols: names, types, prototypes | — | — | ✓ symbol table, STABS; the compiler of each object file | — | — | — | — | — |
@@ -270,7 +270,7 @@ go back to the queue with their old attempts as notes. Each improvement to the s
 
 The GBA is ROM mode without splat (`consoles/gba/`): luvdis finds its functions and `rom/match_arm.py` judges them,
 so what reads splat's listings or MIPS code doesn't reach it yet. Checked on it: the import, drafts, the judge,
-compiler ranges (agbcp's C++, agbcc's `old_agbcc`), split_function, renames, saves and the export. Not yet: twins,
+compiler ranges (agbcp's C++, agbcc's `old_agbcc`) and their range checks, split_function, renames, saves and the export. Not yet: twins,
 the autopilot and the permuter (all read a function's code through the shared ROM path, untried on Thumb), function-end
 reports and the extent repair the 1.0.2 GBA code had (`report_boundary`, cut by halfwords), reimport (it re-splits with
 splat), and the compiler map. Each gets its GBA cell in the table above when it's run on a GBA game.

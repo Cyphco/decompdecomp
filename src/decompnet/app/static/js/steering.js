@@ -548,9 +548,15 @@ const PART_STATE = {
 const hexShort = (n) => "0x" + n.toString(16).toUpperCase();
 async function loadCompilerAnswer() {
   clearTimeout(S.answerTimer);
+  // only for the open project's Settings: while a part was being checked, the timer asked again after the project
+  // was left, with no slug ("no project 'null' here" in the panel)
   const slug = S.slug;
+  if (!slug || S.tab !== "settings") return;
   let a;
-  try { a = await api(`/api/compilermap?slug=${encodeURIComponent(slug)}`); } catch (e) { $("compilerAnswer").textContent = e.message; return; }
+  try { a = await api(`/api/compilermap?slug=${encodeURIComponent(slug)}`); } catch (e) {
+    if (slug === S.slug) $("compilerAnswer").textContent = e.message;
+    return;
+  }
   if (slug !== S.slug || S.tab !== "settings") return;
   renderCompilerAnswer(a);
   if (a.checking) S.answerTimer = setTimeout(loadCompilerAnswer, COMPILER_ANSWER_EVERY_MS);

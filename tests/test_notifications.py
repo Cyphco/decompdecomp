@@ -88,3 +88,46 @@ def test_the_compiler_answer_checks_by_itself(tmp_path, monkeypatch):
     net.surveys["game"] = {"state": "running"}
     net.compiler_answer("game")
     assert surveys == ["game"]  # (one survey at a time)
+
+
+def test_parts_of_a_game_without_a_compiler_map_are_checked_too(tmp_path, monkeypatch):
+    """A GBA game's 120 parts all said "not checked yet": the look at each part waited behind the compiler map, which
+    reads MIPS code only. The survey still needs the map; the parts need only the judge. A part built with another
+    binary of the toolchain says which."""
+    net = RomNetwork(tmp_path / "app.db", tmp_path)
+    tiny_game(net)
+    gba = {"toolchain": "agbcc", "flags": ["-mthumb-interwork", "-O2"]}
+    parts = [{"start": 0x100000, "end": 0x100010, **gba, "variant": "old_agbcc"},
+             {"start": 0x100010, "end": 0x100020, "toolchain": "agbcp", "flags": ["-O2"]}]
+
+    def gba_game(cfg):
+        cfg.update(platform="gba", compiler=gba, compiler_ranges=parts)
+    net._update_cfg("game", gba_game)
+    surveys, audits = [], []
+    monkeypatch.setattr(net, "start_survey", lambda slug: surveys.append(slug) or {"state": "running"})
+    monkeypatch.setattr(net.rangechecks, "audit", lambda proj: audits.append(proj["slug"]) or 0)
+    answer = net.compiler_answer("game")
+    assert audits == ["game"] and surveys == [] and answer["mips"] is False
+    assert [p["compiler"] for p in answer["parts"]] == ["agbcc (old_agbcc)", "agbcp (C++)"]
+
+
+def test_a_range_check_judges_a_part_with_its_variant(tmp_path, monkeypatch):
+    """agbcc's old_agbcc is agbcc with the same flags: judged without the variant, a check of an old_agbcc part
+    compared agbcc with agbcc and could only call it neutral. It compares old_agbcc with the game's agbcc now."""
+    net = RomNetwork(tmp_path / "app.db", tmp_path)
+    proj = tiny_game(net)
+    gba = {"toolchain": "agbcc", "flags": ["-mthumb-interwork", "-O2"]}
+    cfg = {"compiler": gba, "compiler_ranges": [{"start": 0x100000, "end": 0x100010, **gba, "variant": "old_agbcc"}]}
+    with net.store.tx() as db:
+        db.execute("UPDATE functions SET n_insns=20, status='matched', matched_source='int f(void) { return 0; }' "
+                   "WHERE name='func_0'")
+    fn = net.store.one("SELECT * FROM functions WHERE name='func_0'")
+    asked = []
+
+    def judge(proj, fn, toolchain, flags, source, variant=None):
+        asked.append((toolchain, variant))
+        return (variant == "old_agbcc", None, "")  # it matches only with the older snapshot
+    monkeypatch.setattr(net, "_judge_with", judge)
+    label = ("agbcc", ("-mthumb-interwork", "-O2"))
+    assert net.rangechecks._classify(proj, cfg, fn, label, None, {}, variant="old_agbcc") == "confirmed"
+    assert asked == [("agbcc", None)]  # it matches with its range's variant: the other side is the game's agbcc

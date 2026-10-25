@@ -320,14 +320,14 @@ class JudgeMixin:
     def spend(self, slug: str) -> dict | None:
         return self.cfg(self._project(slug)).get("spend")
 
-    def _judge_with(self, proj, fn, toolchain: str, flags: list[str], source: str):
+    def _judge_with(self, proj, fn, toolchain: str, flags: list[str], source: str, variant: str | None = None):
         """(matched, diff or None, log) for C built with this compiler and flags, judged like an attempt, recording
-        nothing."""
+        nothing. `variant`: another binary of the toolchain, as a compiler range can pick (Toolchain.variants)."""
         from ...compiler import compile_source
         from ...project import compiler_config
 
         header = self._context(proj["id"], fn["unit"])["header"]
-        settings = {"toolchain": toolchain, "flags": flags, "timeout": 20}
+        settings = {"toolchain": toolchain, "flags": flags, "timeout": 20, **({"variant": variant} if variant else {})}
         result = compile_source(compiler_config(Path(proj["root"]), {"compiler": settings}), header, source)
         if not result.ok:
             return False, None, result.log
