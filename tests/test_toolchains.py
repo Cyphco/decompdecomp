@@ -205,6 +205,66 @@ def test_a_ghidra_that_didnt_run_says_why(tmp_path, monkeypatch):
     assert not (tmp_path / "cache").exists()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="the native Mac build needs POSIX executable permissions")
+def test_intel_mac_linker_is_built_from_pinned_source(monkeypatch, tmp_path):
+    """No Intel release asset exists: the pinned source yields executable MIPS tools, with no GDB dependency."""
+    from types import SimpleNamespace
+
+    dest = tmp_path / "tools"
+    dest.mkdir()
+    calls = []
+    outputs = ["gas/as-new", "ld/ld-new", "binutils/objcopy", "binutils/objdump", "binutils/nm-new",
+               "binutils/ar", "binutils/ranlib", "binutils/strip-new", "binutils/readelf"]
+    def extract(archive, source, subdir):
+        (source / "configure").touch()
+        (source / "gdb").mkdir()
+        (source / "gdbserver").mkdir()
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        if argv[0].endswith("configure"):
+            source = toolchains.Path(argv[0]).parent
+            assert not (source / "gdb").exists() and not (source / "gdbserver").exists()
+        else:
+            for output in outputs:
+                file = kwargs["cwd"] / output
+                file.parent.mkdir(exist_ok=True)
+                file.write_bytes(b"native host executable")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(toolchains.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(toolchains, "_extract", extract)
+    monkeypatch.setattr(toolchains.limits, "capped", lambda argv: argv)
+    monkeypatch.setattr(toolchains.subprocess, "run", run)
+    toolchains._build_mips_binutils(tmp_path / "pinned.tar.gz", dest, "source", lambda _: None)
+    assert {p.name for p in dest.iterdir()} >= {"mips-ps2-decompals-ld", "mips-ps2-decompals-objcopy", "mips-ps2-decompals-as"}
+    assert all(p.stat().st_mode & 0o111 for p in dest.iterdir())
+    assert len(calls) == 2 and all(kwargs["timeout"] == 900 for _, kwargs in calls)
+    assert calls[0][1]["env"]["CC"] == "/usr/bin/clang"
+    part = toolchains.get("binutils-mips").parts_for("macos-x86_64")[0]
+    assert part["build"] == "mips-binutils" and len(part["sha256"]) == 64
+
+
+def test_source_build_failure_reports_the_build_output(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(toolchains.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(toolchains, "_extract", lambda *args: None)
+    monkeypatch.setattr(toolchains.limits, "capped", lambda argv: argv)
+    monkeypatch.setattr(toolchains.subprocess, "run", lambda *args, **kw: SimpleNamespace(
+        returncode=1, stdout="", stderr="C compiler cannot create executables"))
+    with pytest.raises(toolchains.ToolchainError, match="C compiler cannot create executables"):
+        toolchains._build_mips_binutils(tmp_path / "source.tar.gz", tmp_path, None, lambda _: None)
+
+
+def test_source_build_reports_a_missing_binary(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(toolchains.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(toolchains, "_extract", lambda *args: None)
+    monkeypatch.setattr(toolchains.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0))
+    with pytest.raises(toolchains.ToolchainError, match="did not produce as"):
+        toolchains._build_mips_binutils(tmp_path / "source.tar.gz", tmp_path, None, lambda _: None)
+
+
 def test_ghidras_java_heap_is_half_its_memory_cap(monkeypatch):
     """analyzeHeadless gives Java 2 GB whatever the cap: a bigger game's analysis gets half the cap instead, and the
     other half is left to the decompiler processes it starts. A heap the user chose stays."""

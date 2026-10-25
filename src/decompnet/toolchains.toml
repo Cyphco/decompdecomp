@@ -10,7 +10,7 @@
 #
 # Each part lists its host platforms. Windows uses native tools where available, and Linux-only compilers
 # through WSL 2 (wsl.py). A part for wsl-x86_64 replaces the Linux archive there (a .deb Windows can unpack).
-# The macos-* parts stay for a later macOS version.
+# macOS uses its pinned builds directly; Intel-only parts need Rosetta on Apple Silicon.
 
 [runtime-i386]
 name = "32-bit x86 C runtime (glibc 2.44)"
@@ -51,10 +51,12 @@ platforms = ["linux-x86_64"]
 url = "https://github.com/decompals/mips-gcc-2.7.2/releases/download/v0.1/gcc-2.7.2-mac.tar.gz"
 sha256 = "5923ea59b97d39d65d684a3ef2f25cd1cbcaf2fd0b5cf6a7f1a4804500a770e0"
 platforms = ["macos-x86_64", "macos-arm64"]
+rosetta = true
 [["gcc-2.7.2-kmc".parts]]
 url = "https://github.com/decompals/mips-binutils-2.6/releases/download/v0.3/binutils-2.6-mac.tar.gz"
 sha256 = "ab21ad5908fb7776a4b0c596cc82f216876e3b5d108c7c7c1f33543b3f3fce4c"
 platforms = ["macos-x86_64", "macos-arm64"]
+rosetta = true
 
 ["gcc-2.6.3-psx"]
 name = "GCC 2.6.3 for PlayStation + maspsx (ASPSX 2.34)"
@@ -718,6 +720,14 @@ platforms = ["linux-x86_64"]
 url = "https://github.com/decompals/binutils-mips-ps2-decompals/releases/download/v0.10/binutils-mips-ps2-decompals-macos-arm64.tar.gz"
 sha256 = "948cc736e01b2c135168caabfb616f6ed8efe89f1dad1ed8ef1ca74acb1b742c"
 platforms = ["macos-arm64"]
+# Upstream v0.10 publishes Apple Silicon only. Intel Macs build the exact same source with Xcode's tools.
+[[binutils-mips.parts]]
+url = "https://github.com/decompals/binutils-mips-ps2-decompals/archive/1cb36733961d0ffa2d169ef16032066d94096ac0.tar.gz"
+sha256 = "83817a54570e6b62b87f9a7be31114965750894b547629e187f380079a96f988"
+file = "binutils-mips-source-v0.10.tar.gz"
+subdir = "binutils-mips-ps2-decompals-1cb36733961d0ffa2d169ef16032066d94096ac0"
+platforms = ["macos-x86_64"]
+build = "mips-binutils"
 [[binutils-mips.parts]]
 url = "https://github.com/decompals/binutils-mips-ps2-decompals/releases/download/v0.10/binutils-mips-ps2-decompals-windows-x86-64.zip"
 sha256 = "2bb5904ee174e04f1600cc70ffdb3dc36b0efa4d1892ea446be588ba8dc6198c"

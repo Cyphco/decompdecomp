@@ -888,4 +888,3 @@ def test_a_disc_with_a_second_module_imports_and_its_export_rebuilds_both_byte_f
     assert units.count("ovl_copy") > 15 and len([u for u in units if not u.startswith("ovl_")]) == units.count("ovl_copy")
     res = net.export_rom(slug, log=lambda *_: None)
     assert res["identical"], res.get("log")
-

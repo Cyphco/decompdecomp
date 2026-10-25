@@ -133,7 +133,8 @@ def _missing(console) -> list[str]:
 
     def there(tool: str) -> bool:
         try:
-            return toolchains.installed(tool) is not None or not toolchains.get(tool).supported
+            toolchains.get(tool)
+            return toolchains.installed(tool) is not None
         except toolchains.ToolchainError:  # a program on PATH, not a toolchain
             return shutil.which(tool) is not None
     return [t for t in console.demo_tools if not there(t)] + ([] if ZLIB.exists() else ["zlib (projects/zlib-n64/prepare.py)"])

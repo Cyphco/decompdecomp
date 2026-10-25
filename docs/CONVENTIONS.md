@@ -35,7 +35,7 @@ says how to send a change. Examples point at real code by file and name: search 
 | The GUI | `app/static/`: `index.html`, `app.css`, and `js/` (nine plain scripts loaded in order, one per part of the GUI; `js/base.js` lists them; no build step). The notification centre is in `js/sidebar.js` |
 | Know-how agents read | `app/guide/*.md` (shared), `consoles/<id>/guides/*.md` (one console's), served by `guide(topic)` |
 | Compilers and tools themselves | `toolchains.toml` (pinned, with checksums), `toolchains.py` |
-| The app's window, tray, updates | `app/window.py` + `app/gtkwindow.py`, `app/tray.py`, `app/updates.py`; dev or release: `app/edition.py`; the `decomp` command `app/cli.py`; the apps-menu entry `app/launcher.py`; what the first start removes from older versions `app/cleanup.py` |
+| The app's window, tray, updates | `app/window.py` + `app/gtkwindow.py` + `app/macwindow.py` + `app/winwindow.py`, `app/tray.py`, `app/updates.py`; dev or release: `app/edition.py`; the `decomp` command `app/cli.py`; the apps-menu entry `app/launcher.py`; what the first start removes from older versions `app/cleanup.py` |
 
 A console's code stays in its folder and reaches the rest of the app only through the connector: the engine,
 briefs, twins, the agents' tools and prompts, the export and the GUI ask `consoles.get(platform)`, never `if

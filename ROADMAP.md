@@ -452,6 +452,11 @@ Where to start on a gap:
   Andreas, 129 in Ridge Racer V.
 - **Consoles as packages**: one folder per console (`consoles/<id>/`), a template and a conformance test. PS1 and
   GBA are public decomps only now; the git history keeps their code.
+- **macOS app**: a native Cocoa/WKWebView window with the private window user agent,
+  native open/save panels, downloads, Edit/Reload/Quit menus and the page's close confirmation. A uv source
+  installer creates a Finder app in `~/Applications`. Intel and Apple Silicon CI exercise portable regressions
+  and the hidden native window. KMC GCC/binutils require Rosetta on Apple Silicon; unavailable Linux-only
+  compilers remain unavailable. Mac workers use per-thread QoS so they don't lower the whole app's priority.
 - **Linux packages**: a `.deb`, an `.rpm` and an AppImage with their own Python, built for each release.
 - **Windows native app**: a WebView2 window, Start menu and desktop shortcuts, and a native tray icon.
   A custom native caption follows the app's theme, with Windows resizing, snapping and drag-to-restore. Scrollbars
@@ -649,4 +654,5 @@ The answer goes here: build it, build part of it, or not, and why.
 - **Polish in the drafts.** Methods of known classes are drafted as `Class::method` in the brief; the polishing pass
   doesn't use them yet.
 - A Flatpak on the GNOME runtime.
-- macOS.
+- macOS signed/notarized distribution and a menu bar tray icon.
+- macOS memory, CPU and file-size caps for compiler processes (Linux currently uses systemd scopes).

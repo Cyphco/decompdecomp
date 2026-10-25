@@ -182,6 +182,16 @@ def test_workers_yield_the_cpu_to_the_app():
             return kernel.GetThreadPriority(kernel.GetCurrentThread())
         return os.getpriority(os.PRIO_PROCESS, threading.get_native_id())
 
+    if sys.platform == "darwin":
+        import ctypes
+
+        system = ctypes.CDLL(None)
+        system.qos_class_self.restype = ctypes.c_uint
+        app_qos = system.qos_class_self()
+        app_nice = os.getpriority(os.PRIO_PROCESS, 0)
+        assert workers.pool().submit(system.qos_class_self).result() == 0x11
+        assert system.qos_class_self() == app_qos and os.getpriority(os.PRIO_PROCESS, 0) == app_nice
+        return
     app = priority()
     if os.name == "nt":
         assert workers.pool().submit(priority).result() == -1 and priority() == app

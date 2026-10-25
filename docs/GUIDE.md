@@ -260,14 +260,20 @@ update themselves: the app tells you when a new version is available, and you do
 **Windows.** The release setup bundle installs missing WebView2 and .NET Framework 4.8 runtimes, then opens the app
 installer, which lets you choose an installation folder and whether to add a desktop shortcut. Linux-only period
 compilers run through WSL 2; run `wsl --install` in an
-administrator PowerShell, restart if asked, and open Ubuntu once before importing a game that needs one. macOS is
-not supported in this version.
+administrator PowerShell, restart if asked, and open Ubuntu once before importing a game that needs one.
 
-**Its window and the tray.** decompdecomp opens in a window of its own. It uses GTK and WebKitGTK from your
-system, not a browser. The installer and the packages install them; without them, `decomp` tells you the command
-for your distribution. Only that window can open the app: its address does nothing in a browser. There is only one
+**macOS (Intel and Apple Silicon).** Install the current source with
+`curl -fsSL https://decomp.ndelic.com/install.sh | bash -s -- --source branch:main` until a Mac-capable release is
+tagged. The installer creates `~/Applications/decompdecomp.app`; the app uses a native Cocoa/WebKit window and
+Finder file dialogs. On Apple Silicon, the pinned Intel KMC compiler and binutils need Rosetta 2: run
+`softwareupdate --install-rosetta` and accept Apple's license if you agree. PS1/PS2 period compilers are Linux-only,
+and there is no macOS menu bar tray icon yet. Running `decomp` reopens the window while helpers continue.
+
+**Its window and the tray.** decompdecomp opens in a window of its own. Linux uses GTK and WebKitGTK from your
+system, macOS uses Cocoa and WebKit, and Windows uses WebView2. Only that window can open the app: its address does
+nothing in a browser. There is only one
 window: `decomp` or the apps menu shows the open one. When you close it while helper agents work, the app asks: stop
-them and quit, or keep them working. They keep working without the window; the tray icon (or `decomp`) brings it
+them and quit, or keep them working. They keep working without the window; the tray icon where available (or `decomp`) brings it
 back. **Quit** ends the app and every helper agent it started.
 
 **Updates.** When a new version is available, the app asks you one time. One click installs it and restarts the app.
