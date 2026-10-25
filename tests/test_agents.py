@@ -184,10 +184,12 @@ def test_opencode_2_helpers_get_a_plugin_that_waits_for_the_apps_tools(tmp_path,
 
 
 def test_codex_helpers_cannot_search_the_web(tmp_path, monkeypatch):
-    """Helpers that searched the web pulled a public decomp's code instead of working the function out."""
+    """Helpers that searched the web pulled a public decomp's code instead of working the function out. Nor do they
+    start sub-agents: those share the helper's token and its one claim, and released functions to each other."""
     m = _manager(tmp_path, monkeypatch, "codex")
     cmd, _, _ = m._command(agents.Session("codex-1", "codex", "c", "demo", "codex-1", {}), "t", tmp_path)
     assert 'web_search="disabled"' in cmd and cmd[cmd.index("-s") + 1] == "read-only"
+    assert "features.multi_agent=false" in cmd
 
 
 def test_gemini_cli_helpers_carry_on_as_antigravity():
