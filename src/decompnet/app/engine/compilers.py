@@ -14,6 +14,7 @@ import time
 from ... import arch, compilermap, consoles, toolchains
 from ...network import Agent, NetworkError
 from ...project import compiler_for
+from ...rom import split
 from .common import parse_ranges
 
 # Flag search (search_flags): the flags of each compiler family worth trying, at most MAX_FLAG_VARIANTS compiles
@@ -33,6 +34,18 @@ FLAGS_SHOWN = 6
 def _variant(variant: str | None) -> dict:
     """`variant=` for a judge or a range only when there is one (stand-ins of the judge in tests don't take it)."""
     return {"variant": variant} if variant else {}
+
+
+def in_game(cfg: dict, spans: list[list[int]]) -> None:
+    """Each address range starts and ends in the game's segments (a ROM project's; one without them isn't checked).
+    A GBA game's agent wrote 0x38E04-0x80390E4 for 0x08038E04: its range check grew it to nearly the whole game, and
+    the suggestion could be neither applied (it broke 1,447 matches) nor told apart from a real one."""
+    keys = ("name", "rom_start", "rom_end", "vram")
+    segments = [split.Segment(*(seg[k] for k in keys)) for seg in cfg.get("segments") or [] if all(k in seg for k in keys)]
+    for a, b in spans if segments else []:
+        if b <= a or not any(seg.contains(a) for seg in segments) or not any(seg.contains(b - 1) for seg in segments):
+            where = ", ".join(f"0x{seg.vram:X}-0x{seg.vram + seg.rom_end - seg.rom_start:X}" for seg in segments[:4])
+            raise NetworkError(f"0x{a:X}-0x{b:X} isn't inside the game's code ({where}): check the range's start and end")
 
 
 def _named(toolchain: str, variant: str | None = None) -> str:
@@ -303,6 +316,7 @@ class CompilerMixin:
             raise NetworkError("say what should change, and what you saw that says so")
         proj = self._project(slug)
         cfg = self.cfg(proj)
+        in_game(cfg, spans)
         tc, variant, flag_list, check = None, None, [], None
         if compiler and self.filecompilers.applies(slug):  # its files each have one: a range is checked on files
             return self.filecompilers.suggest(agent, slug, text, compiler, function, ranges)
@@ -587,6 +601,7 @@ class CompilerMixin:
         held two functions whose C only matched with 2.96): then they're open again, their C their best attempt."""
         if self.fork_slug(slug):
             raise NetworkError("a fork builds with the project's own compilers and flags")
+        in_game(self.cfg(self._project(slug)), ranges)
         if toolchain:
             cfg = self.cfg(self._project(slug))
             toolchain = toolchains.get(toolchain).id

@@ -537,3 +537,22 @@ def test_a_release_can_make_c_that_does_what_the_game_does_the_start(tmp_path, m
     assert net.store.one("SELECT detail FROM events WHERE kind='start_from'")["detail"].endswith("the best was 596)")
     net.claim_row(agent, "game", "piece")  # (C that matches: a match, nothing to release)
     assert net.release_function(agent, "piece", "", "game", start_from="exact") == "✅ MATCH"
+
+
+def test_a_new_best_gets_the_permuter_back(tmp_path):
+    """A GBA game's 129 near misses had all used their four permuter turns on bests hours old, and the permuter sat
+    idle while agents kept improving them. An agent's new best gives the function its turns again; the permuter's
+    own improvement doesn't (or it would never stop), nor does an attempt that isn't better."""
+    net = _one_function_game(tmp_path)
+    agent, _ = net.local_agent("claude-opus-1")
+    permuter, _ = net.local_agent("permuter")
+    turns = lambda: net.store.one("SELECT permuted FROM functions WHERE name='piece'")["permuted"]  # noqa: E731
+    with net.store.tx() as db:
+        db.execute("UPDATE functions SET permuted=4, best_score=100, best_source='old' WHERE name='piece'")
+    fn = net.store.one("SELECT * FROM functions WHERE name='piece'")
+    net._record(fn, permuter, 90, "permuted", 1, via="permuter")
+    assert turns() == 4
+    net._record(fn, agent, 95, "worse", 1)
+    assert turns() == 4
+    net._record(fn, agent, 80, "better", 1)
+    assert turns() == 0

@@ -69,3 +69,19 @@ def test_an_old_agbcc_suggestion_keeps_its_variant_to_the_range(gba, monkeypatch
     (r,) = net.cfg(net._project("game"))["compiler_ranges"]
     assert (r["toolchain"], r["variant"], r["start"]) == ("agbcc", "old_agbcc", 0x100000)
     assert [p["compiler"] for p in net.compiler_answer("game")["parts"]] == ["agbcc (old_agbcc)"]
+
+
+def test_a_range_outside_the_game_is_refused(gba, monkeypatch):
+    """A GBA game's agent wrote 0x38E04-0x80390E4 for 0x08038E04: its range check grew it to nearly the whole game,
+    and the user's Apply could only fail (1,447 matches broken). A range must start and end in the game now."""
+    net, agent, _ = gba
+    monkeypatch.setattr(net.rangechecks, "recheck", lambda slug, cid=None: None)
+    net._update_cfg("game", lambda cfg: cfg.__setitem__("segments", [
+        {"name": "rom", "rom_start": 0, "rom_end": 0x800000, "vram": 0x08000000}]))
+    with pytest.raises(NetworkError, match="0x38E04-0x80390E4 isn't inside the game's code"):
+        net.suggest(agent, "game", "C++", compiler="agbcp", ranges="0x38E04-0x80390E4")
+    with pytest.raises(NetworkError, match="isn't inside the game's code"):
+        net.set_compiler_ranges("game", [[0x08000000, 0x09000000]], "agbcp")
+    assert net.cfg(net._project("game")).get("suggestions", []) == []
+    net.set_compiler_ranges("game", [[0x08038E04, 0x08038EA4]], "agbcp")  # (the range it meant)
+    assert [(r["start"], r["toolchain"]) for r in net.cfg(net._project("game"))["compiler_ranges"]] == [(0x08038E04, "agbcp")]

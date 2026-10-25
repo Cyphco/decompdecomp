@@ -1183,9 +1183,12 @@ class Network:
                        "VALUES(?,?,?,?,?,?,?,?)", (fn["id"], agent.id, score, compiled, ctx_version, source, now, via))
             db.execute("UPDATE functions SET attempts=attempts+1 WHERE id=?", (fn["id"],))
             if score is not None:
-                db.execute("UPDATE functions SET best_score=?, best_source=?, best_agent_id=? "
+                # a new best is new C for the permuter to start from: its turns again (not for its own improvements,
+                # or it never stops). A GBA game's 129 near misses had used theirs on the bests of hours before
+                db.execute("UPDATE functions SET best_score=?, best_source=?, best_agent_id=?, "
+                           "permuted=CASE WHEN ? THEN permuted ELSE 0 END "
                            "WHERE id=? AND status='open' AND (best_score IS NULL OR best_score > ?)",
-                           (score, source, agent.id, fn["id"], score))
+                           (score, source, agent.id, via == "permuter", fn["id"], score))
             if matched:
                 db.execute("UPDATE functions SET status='matched', matched_source=?, matched_agent_id=?, "
                            "matched_at=?, best_score=0, best_source=? WHERE id=?",

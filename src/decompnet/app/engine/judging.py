@@ -240,8 +240,8 @@ class JudgeMixin:
         if res.get("score") is None:
             raise NetworkError(f"start_from doesn't compile, so nothing was released:\n{res.get('text', '')[:1500]}")
         with self.store.tx() as db:
-            db.execute("UPDATE functions SET best_score=?, best_source=?, best_agent_id=? WHERE id=? AND status='open'",
-                       (res["score"], source, agent.id, fn["id"]))
+            db.execute("UPDATE functions SET best_score=?, best_source=?, best_agent_id=?, permuted=0 WHERE id=? AND "
+                       "status='open'", (res["score"], source, agent.id, fn["id"]))
             self._event(db, fn["project_id"], agent.id, "start_from",
                         f"{fn['name']}: starts from C that does what the game does (score {res['score']}, "
                         f"the best was {fn['best_score']})")
