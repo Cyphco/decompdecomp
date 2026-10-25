@@ -447,6 +447,23 @@ class RangeChecks:
         self.recheck(proj["slug"])
         return len(added)
 
+    def reweigh_audits(self, proj) -> int:
+        """Every applied part's look weighed again from scratch, settled ones too ("Check again now"): a part judged
+        under an older rule kept its verdict for good (a GBA game's C++ parts stayed "doubtful" after the rule that
+        made them so was fixed). Free evidence only, as audits are. Returns how many."""
+        again: list[int] = []
+
+        def change(cfg):
+            for c in cfg.get("range_checks", []):
+                if c.get("audit"):
+                    c.update(status="checking", evidence={}, tasks=[], given_up=[], range=None, said="weighed again")
+                    again.append(c["id"])
+        self.net._update_cfg(proj["slug"], change)
+        if again:
+            self._verdicts.clear()  # from scratch: the judge is asked again, not what it said under the older rule
+            self.recheck(proj["slug"])
+        return len(again)
+
     def reopen(self, slug: str) -> int:
         """Once: weigh again the checks dismissed as quirks before checks told compilers apart by their flags. Their
         compiler was the game's toolchain with other flags (IDO -O1 or -framepointer on an IDO -O2 game), which counted

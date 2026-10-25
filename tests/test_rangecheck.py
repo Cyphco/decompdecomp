@@ -181,6 +181,28 @@ def test_c_that_doesnt_compile_with_the_ranges_compiler_refutes_nothing():
     assert not any("Look for C that matches with the project's compiler" in t for _, t in net.notes)
 
 
+def test_check_again_weighs_settled_parts_again():
+    """A part judged under an older rule kept its verdict for good: a GBA game's C++ parts stayed "doubtful" after the
+    rule that made them so was fixed. Checking again now weighs every applied part from scratch."""
+    rows = functions(9)
+    for r in rows:
+        if r["name"] in ("f3", "f4", "f5"):
+            r.update(status="matched", matched_source=r["name"])
+    net = FakeNet(rows, {"f4": {CW[0]}, "f3": {GCC[0]}, "f5": {GCC[0]}})
+    f4 = net._function("f4", "game")
+    part = {"start": f4["vram"], "end": f4["vram"] + f4["size"], "toolchain": CW[0], "flags": CW[1]}
+    net._update_cfg("game", lambda cfg: cfg.__setitem__("compiler_ranges", [part]))
+    net.rangechecks.audit(net.proj)
+    (first,) = net.cfg(net.proj)["range_checks"]
+    assert first["status"] == "quirk"  # its neighbours "refute" it
+    net.uncompilable = {(name, CW[0]) for name in ("f3", "f5")}  # what the fixed rule sees: their C isn't CW's
+    net.rangechecks.audit(net.proj)
+    assert net.cfg(net.proj)["range_checks"][0]["status"] == "quirk"  # a plain look keeps a settled verdict
+    assert net.rangechecks.reweigh_audits(net.proj) == 1
+    (again,) = net.cfg(net.proj)["range_checks"]
+    assert again["status"] == "waiting" and again["id"] == first["id"]
+
+
 def test_c_that_matches_with_both_compilers_is_no_evidence():
     net = FakeNet(functions(9), {"f4": {CW[0], GCC[0]}})
     _, check = start(net)

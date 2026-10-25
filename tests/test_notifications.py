@@ -103,12 +103,15 @@ def test_parts_of_a_game_without_a_compiler_map_are_checked_too(tmp_path, monkey
     def gba_game(cfg):
         cfg.update(platform="gba", compiler=gba, compiler_ranges=parts)
     net._update_cfg("game", gba_game)
-    surveys, audits = [], []
+    surveys, audits, again = [], [], []
     monkeypatch.setattr(net, "start_survey", lambda slug: surveys.append(slug) or {"state": "running"})
     monkeypatch.setattr(net.rangechecks, "audit", lambda proj: audits.append(proj["slug"]) or 0)
+    monkeypatch.setattr(net.rangechecks, "reweigh_audits", lambda proj: again.append(proj["slug"]) or 0)
     answer = net.compiler_answer("game")
-    assert audits == ["game"] and surveys == [] and answer["mips"] is False
+    assert audits == ["game"] and surveys == again == [] and answer["mips"] is False
     assert [p["compiler"] for p in answer["parts"]] == ["agbcc (old_agbcc)", "agbcp (C++)"]
+    net.compiler_answer("game", check_now=True)  # "Check again now": the settled parts too
+    assert again == ["game"]
 
 
 def test_a_range_check_judges_a_part_with_its_variant(tmp_path, monkeypatch):
