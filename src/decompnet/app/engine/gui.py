@@ -184,7 +184,9 @@ class GuiMixin:
     def _range_rows(self, cfg: dict) -> list[dict]:
         """The project's compiler ranges for the GUI, each with what checking it again said (rangecheck.py)."""
         said = {tuple(map(tuple, c["spans"])): c.get("said", "") for c in cfg.get("range_checks", []) if c.get("audit")}
-        return [r | {"name": consoles.compiler_name(r["toolchain"]), "check": said.get(((r["start"], r["end"]),), "")}
+        # (an old_agbcc part read "agbcc" to agents, who judged its C with today's agbcc)
+        return [r | {"name": consoles.compiler_name(r["toolchain"]) + (f" ({r['variant']})" if r.get("variant") else ""),
+                     "check": said.get(((r["start"], r["end"]),), "")}
                 for r in cfg.get("compiler_ranges", [])]
 
     def map_signature(self, slug: str) -> str:

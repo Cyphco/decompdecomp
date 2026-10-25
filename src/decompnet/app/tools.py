@@ -11,7 +11,7 @@ import anyio
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
-from .. import __version__, agents, consoles
+from .. import __version__, agents, consoles, toolchains
 from ..network import Agent, NetworkError
 from .engine import RomNetwork
 
@@ -237,6 +237,11 @@ def project_info(net: RomNetwork, slug: str) -> str:
     return text + (f"\nThe user's instructions for this project (they come first):\n{wish}" if wish else "")
 
 
+def _with_variants(compilers: list[str]) -> list[str]:
+    """The compilers try_compiler takes, each toolchain's other binaries too ("old_agbcc"), which agents can name."""
+    return [*compilers, *(v for c in compilers for v in toolchains.get(c).variants)]
+
+
 def _project_info(net: RomNetwork, slug: str) -> str:
     if net.fork_slug(slug):
         return net.forks.info(slug)
@@ -246,7 +251,8 @@ def _project_info(net: RomNetwork, slug: str) -> str:
     return (f"{ov['title']} ({ov['rom']['game_code']}, {ov['rom']['region']})\n"
             f"compiler: {ov['compiler']['name']} {' '.join(ov['compiler']['flags'])}"
             + (f"; these address ranges are built with another:{ranges}" if ranges else "") + "\n"
-            + (f"this platform's compilers (for try_compiler): {', '.join(ov['compilers'])}\n" if len(ov["compilers"]) > 1 else "")
+            + (f"this platform's compilers (for try_compiler): {', '.join(_with_variants(ov['compilers']))}\n"
+               if len(ov["compilers"]) > 1 else "")
             + f"progress: {ov['matched']}/{ov['functions']} functions matched ({pct:.1f}% of code), "
             f"{ov['attempts']} compiles so far, context.h v{ov['context_version']}\n"
             f"Next: claim_function(). Guides: guide().")
@@ -570,7 +576,8 @@ def build_mcp(net: RomNetwork, agent_of: Callable[[Context], tuple[Agent, str]])
 
         Args:
             text: what should change and the evidence
-            compiler: the compiler you think built the game (a toolchain id like ee-gcc-2.95.3)
+            compiler: the compiler you think built the game (a toolchain id like ee-gcc-2.95.3, or a binary of
+                one like old_agbcc, as try_compiler takes it)
             flags: its flags, if not the defaults
             function: a function whose best attempt should match with that compiler: it's checked right away
             ranges: when only parts of the game were built with it: "0x10BFD0-0x10CD40, 0x1106C0-0x1107C0"
@@ -586,8 +593,9 @@ def build_mcp(net: RomNetwork, agent_of: Callable[[Context], tuple[Agent, str]])
 
         Args:
             function: the function to judge it against
-            compiler: a toolchain id (project_info lists this platform's); where each source file has its own
-                compiler (DS), "all" tries every one, and the one that matches becomes the file's
+            compiler: a toolchain id (project_info lists this platform's), or another binary of one by its name
+                ("old_agbcc": agbcc's older snapshot); where each source file has its own compiler (DS), "all"
+                tries every one, and the one that matches becomes the file's
             flags: its flags (default: that compiler's defaults for this game)
             source: the C (default: the function's best attempt)
         """

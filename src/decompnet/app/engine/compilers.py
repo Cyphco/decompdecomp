@@ -28,6 +28,16 @@ MAX_FLAG_VARIANTS = 12
 FLAGS_SHOWN = 6
 
 
+def _variant(variant: str | None) -> dict:
+    """`variant=` for a judge or a range only when there is one (stand-ins of the judge in tests don't take it)."""
+    return {"variant": variant} if variant else {}
+
+
+def _named(toolchain: str, variant: str | None = None) -> str:
+    """A compiler as agents and the compiler answer read it: "agbcc (old_agbcc)" for a toolchain's other binary."""
+    return consoles.compiler_name(toolchain) + (f" ({variant})" if variant else "")
+
+
 class CompilerMixin:
     # Settings: auto-adjust compiler. A suggested compiler is applied without asking once it's proven (a function's
     # C matches with it) or three agents agree on it (see suggest)
@@ -287,17 +297,18 @@ class CompilerMixin:
             raise NetworkError("say what should change, and what you saw that says so")
         proj = self._project(slug)
         cfg = self.cfg(proj)
-        tc, flag_list, check = None, [], None
+        tc, variant, flag_list, check = None, None, [], None
         if compiler:
             if self.fork_slug(slug):
                 raise NetworkError("a fork builds with its project's own compilers: suggest the change in words only "
                                    "(where its files can have their own, try_compiler keeps the one that matches)")
-            tc = self._toolchain_named(cfg, compiler)
+            tc, variant = self._compiler_named(cfg, compiler)
             flag_list = flags.split() or consoles.of(cfg).default_flags(tc, cfg.get("gp"))
-            if not spans and (tc, flag_list) == (cfg["compiler"]["toolchain"], cfg["compiler"]["flags"]):
+            game = cfg["compiler"]
+            if not spans and (tc, flag_list, variant) == (game["toolchain"], game["flags"], game.get("variant")):
                 raise NetworkError("that's already the project's compiler and flags")
             if function:
-                check = self._check_compiler(proj, tc, flag_list, function, source)
+                check = self._check_compiler(proj, tc, flag_list, function, source, variant)
                 if re.search(r"does not match|doesn't compile", check):
                     raise NetworkError(f"not suggested: {check.removeprefix('checked: ')}. Test compilers with "
                                        "try_compiler first; suggest the one its C matches with")
@@ -305,11 +316,11 @@ class CompilerMixin:
         def change(cfg):
             items = cfg.setdefault("suggestions", [])
             same = next((s for s in items if tc and s["status"] == "open" and s["toolchain"] == tc
-                         and s["flags"] == flag_list and s.get("ranges", []) == spans), None)
+                         and s["flags"] == flag_list and s.get("variant") == variant and s.get("ranges", []) == spans), None)
             if same is None:
                 same = {"id": max((s["id"] for s in items), default=0) + 1, "text": text, "toolchain": tc,
-                        "flags": flag_list, "ranges": spans, "agents": [], "check": None, "status": "open",
-                        "t": time.time()}
+                        "flags": flag_list, **_variant(variant), "ranges": spans, "agents": [], "check": None,
+                        "status": "open", "t": time.time()}
                 items.append(same)
             same["agents"] = sorted({*same["agents"], agent.name})
             if check and (not same["check"] or "matches the game" in check):
@@ -320,7 +331,8 @@ class CompilerMixin:
         s = found[0]
         note = f" ({check})" if check else ""
         if spans and tc:  # a hypothesis: its neighbours decide (rangecheck.py), not its size
-            return f"Suggested.{note} " + self.rangechecks.propose(proj, s, function, tc, flag_list, spans, source)
+            return f"Suggested.{note} " + self.rangechecks.propose(proj, s, function, tc, flag_list, spans, source,
+                                                                      variant)
         if tc and self.auto_adjusts(proj) and ("matches the game" in (s["check"] or "") or len(s["agents"]) >= self.AGREE):
             try:
                 self.resolve_suggestion(slug, s["id"], apply=True, guard=True)
@@ -328,7 +340,7 @@ class CompilerMixin:
                 return f"Suggested, not applied by itself: {e}.{note}"
             where = f"{', '.join(f'0x{a:X}-0x{b:X}' for a, b in spans)} build" if spans else "the project builds"
             return (f"Applied (the user lets agreed compiler changes apply themselves): {where} with "
-                    f"{consoles.compiler_name(tc)} {' '.join(flag_list)} from now on.{note}")
+                    f"{_named(tc, variant)} {' '.join(flag_list)} from now on.{note}")
         return f"Suggested: the user sees it on the project page and can apply it.{note}"
 
     def auto_adjusts(self, proj) -> bool:
@@ -372,7 +384,7 @@ class CompilerMixin:
         parts = []
         for r in ranges:
             c = audits.get(((r["start"], r["end"]),)) or {}
-            name = consoles.compiler_name(r["toolchain"]) + (f" ({r['variant']})" if r.get("variant") else "")
+            name = _named(r["toolchain"], r.get("variant"))
             parts.append({"start": r["start"], "end": r["end"], "compiler": name,
                           "flags": " ".join(r["flags"]),
                           "check": c.get("status", ""), "said": c.get("said", "")})
@@ -419,17 +431,31 @@ class CompilerMixin:
         names = [c.id for c in consoles.of(cfg).compilers]
         tc = next((t for t in names if compiler.strip().lower() in (t, consoles.compiler_name(t).lower())), None)
         if tc is None:
-            raise NetworkError(f"no compiler {compiler!r} for this game; its platform's: {', '.join(names)}")
+            others = [v for t in names for v in toolchains.get(t).variants]
+            raise NetworkError(f"no compiler {compiler!r} for this game; its platform's: {', '.join(names + others)}")
         return tc
 
-    def _check_compiler(self, proj, toolchain: str, flags: list[str], function: str, source: str = "") -> str:
+    def _compiler_named(self, cfg: dict, compiler: str) -> tuple[str, str | None]:
+        """A compiler an agent names, and the variant: another binary of its toolchain, as a compiler range can pick
+        (Toolchain.variants), named by itself ("old_agbcc") or as the compiler answer writes it ("agbcc (old_agbcc)").
+        A GBA game's old_agbcc parts were out of agents' reach: no tool took the name, so their C was only ever
+        judged with today's agbcc."""
+        want = " ".join(compiler.split()).lower()
+        for t in (c.id for c in consoles.of(cfg).compilers):
+            for v in toolchains.get(t).variants:
+                if want in (v.lower(), f"{t} ({v})".lower(), f"{consoles.compiler_name(t)} ({v})".lower()):
+                    return t, v
+        return self._toolchain_named(cfg, compiler), None
+
+    def _check_compiler(self, proj, toolchain: str, flags: list[str], function: str, source: str = "",
+                        variant: str | None = None) -> str:
         """Whether a function's C (`source`, else its best attempt, else its latest) matches the game when built with
         this compiler."""
         fn = self._function(function, proj["slug"])
         source = source.strip() or self._source_of(fn)
         if not source:
             return f"not checked: {fn['name']} has no attempt yet"
-        ok, d, _ = self._judge_with(proj, fn, toolchain, flags, source)
+        ok, d, _ = self._judge_with(proj, fn, toolchain, flags, source, **_variant(variant))
         if d is None:
             return f"checked: {fn['name']}'s C doesn't compile with it"
         return f"checked: {fn['name']}'s C {'matches the game byte for byte' if ok else 'does not match'} with it"
@@ -445,19 +471,19 @@ class CompilerMixin:
             return self.forks.try_compiler(agent, slug, function, compiler, flags, source)
         proj = self._project(slug)
         cfg = self.cfg(proj)
-        tc = self._toolchain_named(cfg, compiler)
+        tc, variant = self._compiler_named(cfg, compiler)
         flag_list = flags.split() or consoles.of(cfg).default_flags(tc, cfg.get("gp"))
         fn = self._function(function, slug)
         source = source.strip() or self._source_of(fn)
         if not source:
             raise NetworkError(f"{fn['name']} has no attempt yet: pass the C as source")
-        ok, d, problem = self._judge_with(proj, fn, tc, flag_list, source)
-        what = f"{consoles.compiler_name(tc)} {' '.join(flag_list)}"
+        ok, d, problem = self._judge_with(proj, fn, tc, flag_list, source, **_variant(variant))
+        what = f"{_named(tc, variant)} {' '.join(flag_list)}"
         if d is None:
             return f"{what}: doesn't compile:\n{problem.strip()[-1500:]}"
         if ok:
-            self.rangechecks.tried(proj, fn, tc, flag_list, source, True)
-            return (f"{what}: MATCHES the game byte for byte. Suggest it: suggest(compiler=\"{tc}\", flags=\"{' '.join(flag_list)}\", "
+            self.rangechecks.tried(proj, fn, tc, flag_list, source, True, variant)
+            return (f"{what}: MATCHES the game byte for byte. Suggest it: suggest(compiler=\"{variant or tc}\", flags=\"{' '.join(flag_list)}\", "
                     f"function=\"{fn['name']}\", ranges=<the address range it built>, source=<this C>)")
         return f"{what}: score {d.score} ({d.percent:.1f}%), not a match\n{d.render(context=1, max_rows=40)}"
 
@@ -495,27 +521,28 @@ class CompilerMixin:
         cfg = self.cfg(proj)
         fn = self._function(function, slug)
         own = compiler_for(cfg, fn["vram"])
-        tc = self._toolchain_named(cfg, compiler) if compiler else own["toolchain"]
+        # (without a compiler: the function's own, its part's variant too, or an old_agbcc part's C was judged with agbcc)
+        tc, variant = self._compiler_named(cfg, compiler) if compiler else (own["toolchain"], own.get("variant"))
         base = list(own["flags"]) if tc == own["toolchain"] else consoles.of(cfg).default_flags(tc, cfg.get("gp"))
         source = source.strip() or self._source_of(fn)
         if not source:
             raise NetworkError(f"{fn['name']} has no attempt yet: pass the C as source")
         results = []
         for flags in self.flag_variants(tc, base):
-            ok, d, _ = self._judge_with(proj, fn, tc, flags, source)
+            ok, d, _ = self._judge_with(proj, fn, tc, flags, source, **_variant(variant))
             if d is not None:
                 results.append((0 if ok else max(1, d.score), flags))
         if not results:
-            return f"{consoles.compiler_name(tc)}: the C doesn't compile with any of its flag variants"
+            return f"{_named(tc, variant)}: the C doesn't compile with any of its flag variants"
         results.sort(key=lambda r: r[0])
         lines = [f"- score {score:>5}  {' '.join(flags)}" + ("   ← the project's flags" if flags == base else "")
                  for score, flags in results[:FLAGS_SHOWN]]
         best_score, best = results[0]
-        head = f"{consoles.compiler_name(tc)}, {len(results)} flag variants for {fn['name']} (lower is better):\n"
+        head = f"{_named(tc, variant)}, {len(results)} flag variants for {fn['name']} (lower is better):\n"
         if best_score == 0 and best != base:
             if tc == own["toolchain"]:
-                self.rangechecks.tried(proj, fn, tc, best, source, True)
-            return (head + "\n".join(lines) + f"\nIt MATCHES with {' '.join(best)}. Suggest it: suggest(compiler=\"{tc}\", "
+                self.rangechecks.tried(proj, fn, tc, best, source, True, variant)
+            return (head + "\n".join(lines) + f"\nIt MATCHES with {' '.join(best)}. Suggest it: suggest(compiler=\"{variant or tc}\", "
                     f"flags=\"{' '.join(best)}\", function=\"{fn['name']}\", ranges=<the address range it built>, "
                     f"source=<this C>)")
         own_score = next((score for score, flags in results if flags == base), None)
@@ -529,14 +556,14 @@ class CompilerMixin:
         if hit is None:
             raise NetworkError(f"no suggestion {sid}")
         if apply and hit["toolchain"] and hit.get("ranges"):
-            self.set_compiler_ranges(slug, hit["ranges"], hit["toolchain"], hit["flags"])
+            self.set_compiler_ranges(slug, hit["ranges"], hit["toolchain"], hit["flags"], variant=hit.get("variant"))
         elif apply and hit["toolchain"]:
-            self.set_compiler(slug, hit["toolchain"], hit["flags"], guard=guard)
+            self.set_compiler(slug, hit["toolchain"], hit["flags"], guard=guard, variant=hit.get("variant"))
         self._update_cfg(slug, lambda cfg: next(s for s in cfg["suggestions"] if s["id"] == sid).__setitem__(
             "status", "applied" if apply else "dismissed"))
 
     def set_compiler_ranges(self, slug: str, ranges: list[list[int]], toolchain: str | None,
-                            flags: list[str] | None = None, reopen: bool = False) -> None:
+                            flags: list[str] | None = None, reopen: bool = False, variant: str | None = None) -> None:
         """Address ranges built by another compiler than the rest of the game (replacing ranges they overlap), or
         with toolchain None: those ranges back to the project's compiler. Matched functions that wouldn't match any
         more stop it, unless `reopen` (removing a range the user judged a quirk: Ridge Racer V's two GCC 2.96 ranges
@@ -554,7 +581,8 @@ class CompilerMixin:
         def change(cfg):
             keep = [r for r in cfg.get("compiler_ranges", []) if all(r["end"] <= a or r["start"] >= b for a, b in ranges)]
             if toolchain:
-                keep += [{"start": a, "end": b, "toolchain": toolchain, "flags": flags} for a, b in ranges]
+                keep += [{"start": a, "end": b, "toolchain": toolchain, "flags": flags, **_variant(variant)}
+                         for a, b in ranges]
             cfg["compiler_ranges"] = sorted(keep, key=lambda r: r["start"])
         self._update_cfg(slug, change)
         proj = self._project(slug)
@@ -572,7 +600,7 @@ class CompilerMixin:
                                + ("" if toolchain else ", or remove them and reopen those functions"))
         with self.store.tx() as db:
             where = ", ".join(f"0x{a:X}-0x{b:X}" for a, b in ranges)
-            self._event(db, proj["id"], None, "compiler", f"{consoles.compiler_name(toolchain)} {' '.join(flags)} for {where}"
+            self._event(db, proj["id"], None, "compiler", f"{_named(toolchain, variant)} {' '.join(flags)} for {where}"
                         if toolchain else f"the project's compiler again for {where}")
 
     def _reopen(self, proj, names: list[str], why: str) -> None:
@@ -592,7 +620,8 @@ class CompilerMixin:
                            (d.score if d is not None else None, fn["id"]))
                 self._event(db, proj["id"], None, "reopen", f"{name}: open again ({why})")
 
-    def set_compiler(self, slug: str, toolchain: str, flags: list[str] | None = None, guard: bool = False) -> None:
+    def set_compiler(self, slug: str, toolchain: str, flags: list[str] | None = None, guard: bool = False,
+                     variant: str | None = None) -> None:
         """`guard` (auto-adjust, unattended): matched functions must still match with it, checked on up to 40 of them
         across the game, or nothing changes."""
         if self.fork_slug(slug):
@@ -602,7 +631,7 @@ class CompilerMixin:
         cfg = json.loads(proj["config"])  # a copy of its own: changed below
         before = cfg["compiler"]
         cfg["compiler"] = {"toolchain": tc.id, "flags": flags or consoles.of(cfg).default_flags(tc.id, cfg.get("gp")),
-                           "timeout": 20}
+                           "timeout": 20, **_variant(variant)}
         with self.store.tx() as db:
             db.execute("UPDATE projects SET config=? WHERE id=?", (json.dumps(cfg), proj["id"]))
             db.execute("UPDATE functions SET seed=NULL WHERE project_id=? AND status='open'", (proj["id"],))

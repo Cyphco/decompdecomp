@@ -108,17 +108,20 @@ class RangeChecks:
     # ------------------------------------------------------------------ starting one
 
     def propose(self, proj, suggestion: dict, function: str | None, toolchain: str, flags: list[str],
-                spans: list[list[int]], source: str = "") -> str:
-        """An agent suggested ranges for another compiler: test them before they apply. Returns what the agent is told."""
+                spans: list[list[int]], source: str = "", variant: str | None = None) -> str:
+        """An agent suggested ranges for another compiler (`variant`: another binary of it, agbcc's old_agbcc): test
+        them before they apply. Returns what the agent is told."""
         fn = self.net._function(function, proj["slug"]) if function else None
         check = {"id": 0, "suggestion": suggestion["id"], "toolchain": toolchain, "flags": list(flags),
+                 **({"variant": variant} if variant else {}),
                  "origin": fn["vram"] if fn else None, "origin_source": source or None, "spans": spans,
                  "status": "checking", "evidence": {}, "tasks": [], "given_up": [], "range": None, "t": time.time()}
 
         def add(cfg):
             items = cfg.setdefault("range_checks", [])
             same = next((c for c in items if c["status"] in ("checking", "waiting") and c["toolchain"] == toolchain
-                         and c["flags"] == check["flags"] and c["origin"] == check["origin"]), None)
+                         and c["flags"] == check["flags"] and c.get("variant") == variant
+                         and c["origin"] == check["origin"]), None)
             if same is None:
                 check["id"] = max((c["id"] for c in items), default=0) + 1
                 items.append(check)
@@ -355,7 +358,8 @@ class RangeChecks:
             applied = ""
             if self.net.auto_adjusts(proj):
                 try:
-                    self.net.set_compiler_ranges(proj["slug"], [[start, end]], c["toolchain"], c["flags"])
+                    self.net.set_compiler_ranges(proj["slug"], [[start, end]], c["toolchain"], c["flags"],
+                                                 **({"variant": c["variant"]} if c.get("variant") else {}))
                     applied = " (applied)"
                 except NetworkError as e:
                     applied = f" (not applied: {e})"
@@ -403,12 +407,13 @@ class RangeChecks:
         """Open checks with this function among their tasks."""
         return [c for c in self._open(proj) if vram in c["tasks"]]
 
-    def tried(self, proj, fn, toolchain: str, flags: list[str], source: str, matched: bool) -> None:
+    def tried(self, proj, fn, toolchain: str, flags: list[str], source: str, matched: bool,
+              variant: str | None = None) -> None:
         """try_compiler on a function: C that matches with an open check's compiler (and not today's) confirms it."""
         if not matched or (fn["n_insns"] or 0) < MIN_INSNS:
             return
         for c in self._open(proj):
-            if c["toolchain"] == toolchain and c["flags"] == list(flags) and not c.get("variant"):  # (try_compiler: none)
+            if c["toolchain"] == toolchain and c["flags"] == list(flags) and c.get("variant") == variant:
                 cfg = self.net.cfg(proj)
                 own = compiler_for(cfg, fn["vram"])
                 variant = {"variant": own["variant"]} if own.get("variant") else {}
