@@ -50,7 +50,10 @@ class Codex(Agent):
         cmd += ["-c", f'mcp_servers.decomp_agent={{url="{mcp_url}", bearer_token_env_var="{TOKEN_ENV}", '
                       f'default_tools_approval_mode="approve", tool_timeout_sec={TOOL_TIMEOUT}}}',
                 "-c", 'approval_policy="never"',
-                "-c", 'web_search="disabled"']  # the read-only sandbox keeps its shell offline; this, its own search
+                "-c", 'web_search="disabled"',  # the read-only sandbox keeps its shell offline; this, its own search
+                # one helper, one agent: Codex's sub-agents share the helper's token, so its one claim, and a GBA game's
+                # helpers released functions "because parent coordinator identified a shared backend claim holder"
+                "-c", "features.multi_agent=false"]
         model, _, effort = (model or "").partition("#")
         if effort in self.efforts:  # (one of its own words only: it goes into a TOML value)
             cmd += ["-c", f'model_reasoning_effort="{effort}"']
