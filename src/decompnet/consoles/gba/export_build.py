@@ -354,7 +354,9 @@ def build() -> bool:
     items = layout(pieces, c_objs)
     (ROOT / "build" / "game.ld").write_text(linker_script(items, c_objs), encoding="utf-8")
     objs = sorted({obj for _, obj, _ in items} | set(c_objs.values()))
-    run([arm("ld"), "-e", f"0x{B['base']:X}", "-T", "build/game.ld", "-o", "build/game.elf", *objs])
+    # the objects in a file ld reads (@file): a GBA game's 3,800 of them made a command line longer than Windows takes
+    (ROOT / "build" / "objects.txt").write_text("".join(f'"{obj}"\n' for obj in objs), encoding="utf-8")
+    run([arm("ld"), "-e", f"0x{B['base']:X}", "-T", "build/game.ld", "-o", "build/game.elf", "@build/objects.txt"])
     run([arm("objcopy"), "-O", "binary", "build/game.elf", B["output"]])
     out, base = (ROOT / B["output"]).read_bytes(), (ROOT / B["image"]).read_bytes()
     if out == base:
