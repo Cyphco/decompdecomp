@@ -107,21 +107,34 @@ def test_a_range_is_written_only_once_its_matches_hold(gba, monkeypatch):
     assert seen == [[]] and net.cfg(net._project("game")).get("compiler_ranges", []) == []
 
 
-def test_check_again_takes_out_a_range_outside_the_game_and_keeps_its_matches(gba, monkeypatch):
+def test_check_again_takes_out_a_range_outside_the_game_and_restores_what_it_replaced(gba, monkeypatch):
+    """A GBA game's 0x38E04-0x80390E4 (agbcp) was applied over 1,487 matches and replaced the 52 ranges inside it.
+    Check again takes it out, brings those ranges back as their audits remember them (old_agbcc here), gives a match
+    that holds only with agbcp a range of its own once the judge says so, and opens one nothing makes match."""
     net, _, _ = gba
     bad = {"start": 0x38E04, "end": 0x100030, "toolchain": "agbcp", "flags": ["-O2"]}
+    lost = {"id": 1, "audit": True, "spans": [[0x100000, 0x100010]], "toolchain": "agbcc", "variant": "old_agbcc",
+            "flags": ["-O2"], "status": "confirmed"}
+
     def setup(cfg):
         cfg["segments"] = [{"name": "rom", "rom_start": 0, "rom_end": 0x100, "vram": 0x100000}]
         cfg["compiler_ranges"] = [bad, {"start": 0x100030, "end": 0x100040, "toolchain": "agbcp", "flags": ["-O2"]}]
+        cfg["range_checks"] = [lost]
     net._update_cfg("game", setup)
-    with net.store.tx() as db:  # func_0 matched with the game's compiler; func_1 only holds with agbcp
-        db.execute("UPDATE functions SET status='matched', matched_source='x' WHERE name IN ('func_0', 'func_1')")
-    monkeypatch.setattr(net, "regression_test", lambda proj, header, only=None, **kw: [
-        ("func_1", "compiles but no longer matches")])
+    with net.store.tx() as db:  # func_0: old_agbcc's; func_1: agbcp's; func_2: matched with nothing any more
+        db.execute("UPDATE functions SET status='matched', matched_source='x' WHERE name IN ('func_0','func_1','func_2')")
+
+    def regression(proj, header, only=None, **kw):
+        assert {"start": 0x100000, "end": 0x100010, "toolchain": "agbcc", "flags": ["-O2"], "variant": "old_agbcc"}             in json.loads(proj["config"])["compiler_ranges"]  # (judged with the range it had replaced back)
+        return [("func_1", "compiles but no longer matches"), ("func_2", "compiles but no longer matches")]
+    monkeypatch.setattr(net, "regression_test", regression)
+    monkeypatch.setattr(net, "_judge_with", lambda proj, fn, tc, flags, source, variant=None: (
+        fn["name"] == "func_1" and tc == "agbcp", Diff(), ""))
     said = net.recheck("game", log=lambda *_: None)
     assert said.startswith("1 compiler range outside the game taken out")
-    ranges = [(r["start"], r["end"], r["toolchain"]) for r in net.cfg(net._project("game"))["compiler_ranges"]]
-    assert ranges == [(0x100010, 0x100020, "agbcp"), (0x100030, 0x100040, "agbcp")]  # func_1 alone keeps agbcp
-    assert "that range isn't inside the game (1 of its matches keep agbcp (C++)" in net.store.one(
-        "SELECT detail FROM events WHERE kind='compiler' ORDER BY id DESC LIMIT 1")["detail"]
+    ranges = [(r["start"], r["toolchain"], r.get("variant")) for r in net.cfg(net._project("game"))["compiler_ranges"]]
+    assert ranges == [(0x100000, "agbcc", "old_agbcc"), (0x100010, "agbcp", None), (0x100030, "agbcp", None)]
+    assert net.store.one("SELECT status FROM functions WHERE name='func_2'")["status"] == "open"
+    assert net.store.one("SELECT status FROM functions WHERE name='func_0'")["status"] == "matched"
+    assert "1 range(s) it had replaced are back, 1 match(es) keep its compiler for themselves, 1 open again" in         net.store.one("SELECT detail FROM events WHERE kind='compiler' ORDER BY id DESC LIMIT 1")["detail"]
     assert net.drop_ranges_outside("game") == 0  # (once)
