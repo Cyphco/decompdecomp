@@ -601,14 +601,12 @@ class CompilerMixin:
         held two functions whose C only matched with 2.96): then they're open again, their C their best attempt."""
         if self.fork_slug(slug):
             raise NetworkError("a fork builds with the project's own compilers and flags")
-        in_game(self.cfg(self._project(slug)), ranges)
-        if toolchain:
+        if toolchain:  # (a range already outside the game can always be taken out again)
+            in_game(self.cfg(self._project(slug)), ranges)
             cfg = self.cfg(self._project(slug))
             toolchain = toolchains.get(toolchain).id
             flags = flags or consoles.default_flags(cfg, toolchain)
         flags = flags or []
-
-        before = self.cfg(self._project(slug)).get("compiler_ranges", [])
 
         def change(cfg):
             keep = [r for r in cfg.get("compiler_ranges", []) if all(r["end"] <= a or r["start"] >= b for a, b in ranges)]
@@ -616,24 +614,70 @@ class CompilerMixin:
                 keep += [{"start": a, "end": b, "toolchain": toolchain, "flags": flags, **_variant(variant)}
                          for a, b in ranges]
             cfg["compiler_ranges"] = sorted(keep, key=lambda r: r["start"])
-        self._update_cfg(slug, change)
         proj = self._project(slug)
-        # functions already matched in those ranges must still match with it (auto-adjust runs unattended)
+        # functions already matched in those ranges must still match with it (auto-adjust runs unattended), judged on
+        # a trial of the settings: the range was written first and taken back after, and a GBA game's check of 1,447
+        # matches outlasted the app (it restarted for an update), so a range that broke them all stayed applied
+        trial = json.loads(proj["config"])
+        change(trial)
+        trial_proj = {**dict(proj), "config": json.dumps(trial)}
         inside = [f for f in self.store.all("SELECT * FROM functions WHERE project_id=? AND status='matched'", proj["id"])
                   if any(a <= (f["vram"] or -1) < b for a, b in ranges)]
-        broken = self.regression_test(proj, None, only=inside,
+        broken = self.regression_test(trial_proj, None, only=inside,
                                       header_for=lambda f: self._context(proj["id"], f["unit"])["header"]) if inside else []
-        if broken and reopen and not toolchain:
-            self._reopen(proj, [n for n, _ in broken], "its range was removed")
-        elif broken:
-            self._update_cfg(slug, lambda cfg: cfg.__setitem__("compiler_ranges", before))
+        if broken and not (reopen and not toolchain):
             raise NetworkError(f"{len(broken)} matched function(s) in those ranges wouldn't match with it any more "
                                f"({', '.join(n for n, _ in broken[:5])}): narrow the ranges"
                                + ("" if toolchain else ", or remove them and reopen those functions"))
+        self._update_cfg(slug, change)
+        proj = self._project(slug)
+        if broken:  # (a range the user removed, its functions open again)
+            self._reopen(proj, [n for n, _ in broken], "its range was removed")
         with self.store.tx() as db:
             where = ", ".join(f"0x{a:X}-0x{b:X}" for a, b in ranges)
             self._event(db, proj["id"], None, "compiler", f"{_named(toolchain, variant)} {' '.join(flags)} for {where}"
                         if toolchain else f"the project's compiler again for {where}")
+
+    def drop_ranges_outside(self, slug: str, log=print) -> int:
+        """Compiler ranges that don't start and end in the game (in_game) taken out, Check again's repair: a GBA
+        game's 0x38E04-0x80390E4 (an agent's 0x08038E04 without its 0x08) was applied over 1,487 matches made with
+        the game's compiler. A match that only holds with such a range's compiler keeps it, as a range of its own.
+        How many ranges went."""
+        proj = self._project(slug)
+        cfg = self.cfg(proj)
+        bad = []
+        for r in cfg.get("compiler_ranges", []):
+            try:
+                in_game(cfg, [[r["start"], r["end"]]])
+            except NetworkError:
+                bad.append(r)
+        if not bad:
+            return 0
+        trial = json.loads(proj["config"])
+        trial["compiler_ranges"] = [r for r in trial.get("compiler_ranges", []) if r not in bad]
+        inside = {f["name"]: f for f in self.store.all("SELECT * FROM functions WHERE project_id=? AND status='matched'",
+                                                        proj["id"]) if any(r["start"] <= (f["vram"] or -1) < r["end"] for r in bad)}
+        log(f"checking {len(inside)} matched functions inside {len(bad)} compiler range(s) outside the game")
+        broken = self.regression_test({**dict(proj), "config": json.dumps(trial)}, None, only=list(inside.values()),
+                                      header_for=lambda f: self._context(proj["id"], f["unit"])["header"]) if inside else []
+        own = []
+        for name, _ in broken:  # (matched with the bad range's compiler: that one, for that function alone)
+            fn = inside[name]
+            r = next(r for r in bad if r["start"] <= fn["vram"] < r["end"])
+            own.append({"start": fn["vram"], "end": fn["vram"] + fn["size"], "toolchain": r["toolchain"],
+                        "flags": list(r["flags"]), **_variant(r.get("variant"))})
+
+        def change(cfg):
+            kept = [r for r in cfg.get("compiler_ranges", []) if r not in bad]
+            kept += [o for o in own if all(k["end"] <= o["start"] or k["start"] >= o["end"] for k in kept)]
+            cfg["compiler_ranges"] = sorted(kept, key=lambda r: r["start"])
+        self._update_cfg(slug, change)
+        with self.store.tx() as db:
+            for r in bad:
+                self._event(db, proj["id"], None, "compiler", f"the project's compiler again for 0x{r['start']:X}-"
+                            f"0x{r['end']:X}: that range isn't inside the game" + (f" ({len(own)} of its matches keep "
+                            f"{_named(r['toolchain'], r.get('variant'))} as ranges of their own)" if own else ""))
+        return len(bad)
 
     def _reopen(self, proj, names: list[str], why: str) -> None:
         """Matched functions open again: their matching C becomes their best attempt, scored with the compiler they're

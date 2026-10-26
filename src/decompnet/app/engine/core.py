@@ -114,13 +114,17 @@ class Core(Network):
         row = self.project_row(slug)
         if slug in self.links or (only_if_updated and self.cfg(row).get("checked") == __version__):
             return None
+        dropped = 0
         if self.is_rom(row):
             self.rangechecks.reopen(slug)
+            dropped = self.drop_ranges_outside(slug, log=log)
         last = self.store.one("SELECT COALESCE(MAX(id), 0) AS id FROM events WHERE project_id=?", row["id"])["id"]
         self.console(row).on_start(self, slug, log=log)
         # what the console's work did, it said in the feed ("8 pieces of functions ... joined"): in the answer too
         done = [r["detail"] for r in self.store.all("SELECT detail FROM events WHERE project_id=? AND id>? AND "
                                                      "kind='analysis' ORDER BY id", row["id"], last)]
+        if dropped:
+            done.insert(0, f"{dropped} compiler range{'' if dropped == 1 else 's'} outside the game taken out")
         n = self.not_c_from_notes(slug) + self.twins.set_aside_asm(self.project_row(slug))
         self._update_cfg(slug, lambda cfg: cfg.update(checked=__version__))
         if n:
