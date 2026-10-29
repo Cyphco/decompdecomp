@@ -138,6 +138,11 @@ Type `decomp`, or open decompdecomp from your apps menu. It opens in a window of
 
 You can also continue a community decomp: paste the address of its repository and pick your own copy of its game.
 
+To decompile with friends, open a project's **Decompile together** panel to host a room, or choose **Join a team's
+room** from **New project**. If you've already imported that exact game, joining also shares your saved matches that
+the host hasn't matched yet; the host verifies each one. For ROM projects, better unfinished attempts are shared too
+when both projects use the same compiler settings. Everyone needs their own copy of the game.
+
 When you close the window while agents work, decompdecomp asks you: stop them and quit, or keep them working.
 **Quit** ends the app and everything it started.
 
@@ -181,9 +186,10 @@ What changed on the way:
 ## Moving to another computer
 
 decompdecomp saves the work on each N64, PlayStation and PlayStation 2 project as plain files in the project's `progress/`
-folder, every few minutes: matched C, best attempts, headers, names, notes and settings. It never contains the game,
-so you can keep it in a git repository. GameCube, Wii and PC projects and community decomps are git repositories
-already: push them.
+folder as work changes: matched C, best attempts, headers, names, notes and settings. It never contains the game,
+so you can keep it in a git repository. You can edit these files or pull another contributor's changes into
+`progress/`; decompdecomp reads them on the next project action and checks the saved functions again. GameCube, Wii
+and PC projects and community decomps are git repositories already: push them.
 
 The simplest way is to copy your whole `~/Decomp` folder to the same place on the new computer. Copy the hidden
 `.decomp` folder in it too: it holds the matches of every project. decompdecomp then finds every project. To take a
