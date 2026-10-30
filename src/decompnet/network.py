@@ -1364,4 +1364,6 @@ class Network:
             for table in ("notes", "events", "context_versions", "functions", "symbols", "twin_misses"):
                 db.execute(f"DELETE FROM {table} WHERE project_id=?", (proj["id"],))
             db.execute("DELETE FROM projects WHERE id=?", (proj["id"],))
+        if progress := getattr(self, "progress", None):
+            progress.forget(slug, proj["id"])
         return len(ids)

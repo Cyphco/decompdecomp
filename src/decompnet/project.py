@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 from . import toolchains, wsl
@@ -22,6 +23,14 @@ def compiler_for(cfg: dict, vram: int | None) -> dict:
     return cfg["compiler"]
 
 
+def unknown_compiler_message(toolchain: str) -> str:
+    """What a project whose config names a compiler decompdecomp doesn't have says wherever it surfaces (compiling,
+    autopilot): what's wrong and the one thing to do about it. The registry's own "known: ..." list named 50 ids and
+    no way out (#118: a project from another tool opened with that error)."""
+    return (f"this project's compiler {toolchain!r} isn't one decompdecomp has: pick a compiler in this project's "
+            "Settings, then try again")
+
+
 def compiler_config(root: Path, cfg: dict) -> CompilerConfig:
     """Build the sandboxed compile command for a project.
 
@@ -34,7 +43,10 @@ def compiler_config(root: Path, cfg: dict) -> CompilerConfig:
     linux = False
     prelude, cplusplus = "", False
     if "toolchain" in c:
-        tc = toolchains.get(c["toolchain"])
+        try:
+            tc = toolchains.get(c["toolchain"])
+        except toolchains.ToolchainError:
+            raise toolchains.ToolchainError(unknown_compiler_message(c["toolchain"])) from None
         prelude, cplusplus = tc.prelude, tc.cplusplus
         linux = tc.via_wsl  # Windows: a Linux toolchain, run inside WSL 2
         if linux and not (ok := wsl.status())[0]:
@@ -63,8 +75,11 @@ def compiler_config(root: Path, cfg: dict) -> CompilerConfig:
                 known = ", ".join(sorted(tc.variants)) or "none"
                 raise toolchains.ToolchainError(f"{tc.name} has no variant {variant!r} (its variants: {known})")
             base = [a.replace(tc.cc[0], tc.variants[variant]) for a in base]
-        cmd = [a.replace("{tc}", tc_dir) for a in base]
         prelude = prelude.replace("{tc}", tc_dir)  # agbcp's prelude names its STLport headers' folders
+        # The bundled Mac app owns a supported Python; /usr/bin/python3 may still be 3.9 and cannot run maspsx.
+        # Linux sandboxes and WSL use their own python3, not a host interpreter outside their mounts.
+        python = sys.executable if sys.platform == "darwin" else "python3"
+        cmd = [a.replace("{tc}", tc_dir).replace("{python}", python) for a in base]
         for dep, where in zip(tc.requires, where_tools[1:]):  # {tc:<id>} is another toolchain this one needs
             cmd = [a.replace(f"{{tc:{dep}}}", where) for a in cmd]
     else:

@@ -348,9 +348,11 @@ HANDLERS: dict[str, Callable[..., str]] = {
         net.forks.propose_join(agent, _fork(net, slug, "join_functions"), function, with_function, reason),
 }
 
-ROM_ONLY = {"get_context", "edit_context", "split_function",
-            "redraft",
-            "search_flags"}
+READ_ONLY = frozenset({"project_info", "get_function", "last_diff", "get_context", "read_data", "get_class",
+                       "guess_struct", "compiler_map", "list_functions", "search_flags", "search_notes",
+                       "find_similar", "guide", "read_file", "search_code", "file_status"})
+
+ROM_ONLY = {"get_context", "edit_context", "split_function", "redraft", "search_flags"}
 FORK_ONLY = {"read_file", "search_code", "edit_file", "file_status", "split_file", "join_functions", "tidy_done"}
 
 
@@ -380,12 +382,21 @@ def _named(net: RomNetwork, agent: Agent, slug: str, args: dict) -> dict:
     return args
 
 
+def _invoke(net: RomNetwork, agent: Agent, slug: str, name: str, args: dict) -> str:
+    """Every helper sees pulled changes before acting; only tools that write work need a second synchronization."""
+    net.progress.sync(slug, force=True)
+    result = HANDLERS[name](net, agent, slug, **_named(net, agent, slug, args))
+    if name not in READ_ONLY:
+        net.progress.sync(slug, force=True)
+    return result
+
+
 def call(net: RomNetwork, agent: Agent, slug: str, name: str, args: dict) -> str:
     """Run one tool for the built-in agent; errors come back as text the model can act on."""
     if name not in HANDLERS:
         return f"error: unknown tool {name!r}"
     try:
-        return HANDLERS[name](net, agent, slug, **_named(net, agent, slug, args))
+        return _invoke(net, agent, slug, name, args)
     except NetworkError as e:
         return f"error: {e}"
     except TypeError as e:
@@ -407,7 +418,7 @@ def build_mcp(net: RomNetwork, agent_of: Callable[[Context], tuple[Agent, str]])
         except NetworkError as e:
             raise ToolError(str(e)) from None
         try:
-            return await anyio.to_thread.run_sync(lambda: HANDLERS[name](net, agent, slug, **_named(net, agent, slug, args)))
+            return await anyio.to_thread.run_sync(lambda: _invoke(net, agent, slug, name, args))
         except NetworkError as e:
             raise ToolError(str(e)) from None
 

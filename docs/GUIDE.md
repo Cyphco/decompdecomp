@@ -131,7 +131,9 @@ decompdecomp helps with these steps:
 
 The app starts each helper itself, from **Start agents** in the project's header. A helper that stops starts again
 by itself. On a usage limit it waits until the limit resets. Five fast failures in a row pause it, and the app says
-why. Run several helpers, of different models: they work on different functions at the same time.
+why. Run several helpers, of different models: they work on different functions at the same time. Choose **Multiple
+models** in the launcher to pick several at once; the app remembers the choice. One start can begin at most 24
+helpers in total.
 
 Agents get only the tools of decompdecomp. They get no shell. They cannot access your files, except the source tree
 of a fork. The app installs missing agents and tells you how to sign in.
@@ -220,7 +222,8 @@ different build, which is planned.
   when you give its path (the game's folder, or its .exe; a dropped file comes alone): each DLL is a program of the
   project, with its source files in `src/auto/<its name>/`, its exports' names and its own Visual C++. The C
   runtime, DirectX wrappers, middleware (Miles, Bink, FMOD...), copy protection, ASI plugins and DLLs built long
-  after the game (mods) are left out, and the import's log says which and why.
+  after the game (mods) are left out, and the import's log says which and why. [VISUAL-CPP.md](VISUAL-CPP.md)
+  lists the Visual C++ builds decompdecomp has, how it picks one, and where their code changes.
 
 Please [report problems](https://github.com/n-delic/decompdecomp/issues). The status of a public decomp is the status
 of its own project.
@@ -281,9 +284,11 @@ Helper agents continue their work. To change this behavior, go to Settings.
 
 ## Your work
 
-**Saving.** decompdecomp saves the work on each N64, PlayStation and PlayStation 2 project by itself, every few minutes, as plain
+**Saving.** decompdecomp saves the work on each N64, PlayStation and PlayStation 2 project by itself as it changes, as plain
 files in the project's `progress/` folder: matched C, best attempts, headers, names, notes, compiler ranges and
 settings. It never saves the game. **Save now**, in the project's Settings, saves at once, also to another folder.
+You can edit files in `progress/` or pull another contributor's changes into it; decompdecomp reads them on the next
+project action and checks the saved functions again.
 `progress/` is the only part of a project to share or keep in git: matched C in `src/`, best attempts in `best/`, the
 shared headers in `include/`, and `decompdecomp.json` (the game's fingerprint, compiler, layout, names, notes and
 settings). The rest of the project's folder (the ROM, `asm/`, `assets/`, the build files) is made from your copy of

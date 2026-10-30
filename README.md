@@ -88,9 +88,10 @@ bash site/public/install.sh
 
 The installer uses uv and Python 3.12, installs the Cocoa/WebKit bridge, gets the free tools, and creates
 `~/Applications/decompdecomp.app`. Open it from Finder or run `decomp`. Projects stay in `~/Decomp`;
-toolchains live in `~/Library/Application Support/decompnet/toolchains`. Intel Macs also need Xcode Command Line
-Tools (`xcode-select --install`) to build the pinned modern MIPS binutils on their first N64 export; upstream only
-publishes those tools for Apple Silicon. Finder launches preserve the PATH
+toolchains live in `~/Library/Application Support/decompnet/toolchains`. Xcode Command Line Tools
+(`xcode-select --install`) are needed on Intel Macs for N64's MIPS binutils, and on both Mac architectures to
+build PS1 GCC 2.6.3 from pinned source on first use. The ready-made 2.7.2 and 2.8.1 compiler binaries are for
+Apple Silicon. Finder launches preserve the PATH
 from installation so your installed Node and helper CLIs remain available; rerun `decomp shortcut` after
 changing their locations. This is a source install; there is no signed DMG or macOS release bundle yet.
 
@@ -107,6 +108,7 @@ installed automatically. IDO still needs your explicit license acceptance in Com
 | Mac capability | Availability |
 | --- | --- |
 | N64 ROM import, compile, match and export | KMC GCC via Rosetta on Apple Silicon; directly on Intel |
+| PS1 GCC 2.6.3, 2.7.2 and 2.8.1, with maspsx | All three run natively on Apple Silicon; GCC 2.6.3 builds from pinned source on both Mac architectures |
 | Native window, file/folder pickers and export downloads | Cocoa and system WKWebView, no GTK or X11 |
 | m2c, decomp-permuter and objdiff | Pinned Mac/Python builds |
 | Other consoles and public decomp projects | Only where their pinned compiler/tool builds support this Mac |
@@ -135,6 +137,11 @@ Type `decomp`, or open decompdecomp from your apps menu. It opens in a window of
 4. **Export** (in the project's header). You get a decomp project that builds your game again, byte for byte.
 
 You can also continue a community decomp: paste the address of its repository and pick your own copy of its game.
+
+To decompile with friends, open a project's **Decompile together** panel to host a room, or choose **Join a team's
+room** from **New project**. If you've already imported that exact game, joining also shares your saved matches that
+the host hasn't matched yet; the host verifies each one. For ROM projects, better unfinished attempts are shared too
+when both projects use the same compiler settings. Everyone needs their own copy of the game.
 
 When you close the window while agents work, decompdecomp asks you: stop them and quit, or keep them working.
 **Quit** ends the app and everything it started.
@@ -179,9 +186,10 @@ What changed on the way:
 ## Moving to another computer
 
 decompdecomp saves the work on each N64, PlayStation and PlayStation 2 project as plain files in the project's `progress/`
-folder, every few minutes: matched C, best attempts, headers, names, notes and settings. It never contains the game,
-so you can keep it in a git repository. GameCube, Wii and PC projects and community decomps are git repositories
-already: push them.
+folder as work changes: matched C, best attempts, headers, names, notes and settings. It never contains the game,
+so you can keep it in a git repository. You can edit these files or pull another contributor's changes into
+`progress/`; decompdecomp reads them on the next project action and checks the saved functions again. GameCube, Wii
+and PC projects and community decomps are git repositories already: push them.
 
 The simplest way is to copy your whole `~/Decomp` folder to the same place on the new computer. Copy the hidden
 `.decomp` folder in it too: it holds the matches of every project. decompdecomp then finds every project. To take a
