@@ -21,7 +21,9 @@ from ..network import Agent, NetworkError
 
 MODELS_TO_AGREE = 2
 SAME_IDEA_RATIO = 0.6  # word overlap above which a new proposal is probably one that's open already
-MAX_TEXT = 600
+MAX_TEXT = 16_000  # retain complete explanations and code; oversized proposals fail without saving a prefix
+PREVIEW_CHARS = 600  # only the prompt is shortened; get_knowledge reads the full stored entry
+SEARCH_PAGE = 20
 SHOWN_IN_PROMPT = 2500  # characters of accepted knowledge in a session's prompt
 OPEN_SHOWN = 8  # open proposals an agent is shown, newest first
 COMPILER_TALK = re.compile(r"\b(compil(er|ed)|toolchain|flags?|gcc|ido|mwcc|codewarrior|mwcps2|mwccpsp|snc|msvc)\b|(^|\s)-[OG]\d",
@@ -67,6 +69,13 @@ def _words(text: str) -> list[str]:
     return re.findall(r"[a-z0-9_]+", text.lower())
 
 
+def _preview(row) -> str:
+    text = " ".join(row["text"].split())
+    if len(text) > PREVIEW_CHARS:
+        text = text[:PREVIEW_CHARS].rsplit(" ", 1)[0] + f"… (full entry: get_knowledge(number={row['id']}))"
+    return f"- #{row['id']}: {text}"
+
+
 class Knowledge:
     def __init__(self, net):
         self.net = net
@@ -100,16 +109,19 @@ class Knowledge:
         proj = self.net._project(slug)
         if supports:
             return self._support(agent, proj, int(supports))
-        text = " ".join(text.split())[:MAX_TEXT]
+        text = text.strip()
         if not text:
             raise NetworkError("say what every agent on this game should know (text), or back a proposal (supports=id)")
+        if len(text) > MAX_TEXT:
+            raise NetworkError(f"knowledge can contain up to {MAX_TEXT} characters. Nothing was saved; split this "
+                               "into separate findings, with the full code in the function's source")
         if COMPILER_TALK.search(text):
             raise NetworkError("which compiler built what isn't shared knowledge: the compiler map settles it with "
                                "evidence. Use try_compiler, compiler_map or suggest(...) instead")
         mine = _words(text)
         for row in self._open(proj):
             if difflib.SequenceMatcher(None, mine, _words(row["text"])).ratio() >= SAME_IDEA_RATIO:
-                return (f"A proposal like it is open already, #{row['id']}: \"{row['text']}\". If it says the same, "
+                return (f"A proposal like it is open already:\n{_preview(row)}\nIf it says the same, "
                         f"back it: share_knowledge(supports={row['id']}). If yours says something else, say what "
                         f"differs.")
         with self.net.store.tx() as db:
@@ -174,15 +186,42 @@ class Knowledge:
         """What every agent starts with: the accepted knowledge, then the open proposals it can back."""
         proj = self.net._project(slug)
         out, used = [], 0
-        for r in self.net.store.all("SELECT text FROM knowledge WHERE project_id=? AND status=? ORDER BY id DESC",
+        for r in self.net.store.all("SELECT id,text FROM knowledge WHERE project_id=? AND status=? ORDER BY id DESC",
                                     proj["id"], ACCEPTED):
-            if used + len(r["text"]) > SHOWN_IN_PROMPT:
+            preview = _preview(r)
+            if used + len(preview) > SHOWN_IN_PROMPT:
                 break
-            out.append(f"- {r['text']}")
-            used += len(r["text"])
+            out.append(preview)
+            used += len(preview)
         text = ("What agents learned about this game (agreed by different models):\n" + "\n".join(out)) if out else ""
         open_ = self._open(proj)[:OPEN_SHOWN]
         if open_:
             text += ("\n\nProposals waiting for a second model (back one with share_knowledge(supports=N) only when "
-                     "your own work shows it):\n" + "\n".join(f"- #{r['id']}: {r['text']}" for r in open_))
+                     "your own work shows it; read the full entry first):\n" + "\n".join(_preview(r) for r in open_))
+        if text:
+            text += "\nSearch all entries with get_knowledge(query=\"...\"); read one with get_knowledge(number=N)."
         return text.strip()
+
+    def read(self, slug: str, number: int = 0, query: str = "", start: int = 0) -> str:
+        """Read complete knowledge without enlarging every prompt, or search a project's entries including rejections.
+
+        Status stays visible: finding an old proposal is not agreement with it. Search is literal, and paginated so
+        a popular term never hides older recipes behind a fixed result limit.
+        """
+        proj = self.net._project(slug)
+        if number:
+            row = self.net.store.one("SELECT * FROM knowledge WHERE project_id=? AND id=?", proj["id"], number)
+            if row is None:
+                raise NetworkError(f"no knowledge #{number} on this project; search with get_knowledge(query=\"...\")")
+            return f"Knowledge #{row['id']} ({row['status']}):\n{row['text']}"
+        start = max(0, int(start))
+        rows = self.net.store.all("SELECT id,text,status FROM knowledge WHERE project_id=? "
+                                  "AND instr(lower(text),lower(?)) > 0 ORDER BY id DESC LIMIT ? OFFSET ?",
+                                  proj["id"], query.strip(), SEARCH_PAGE + 1, start)
+        if not rows:
+            return "No knowledge entries found on this project."
+        out = ["Knowledge entries (read the full text with get_knowledge(number=N)): "]
+        out += [f"[{r['status']}] {_preview(r)}" for r in rows[:SEARCH_PAGE]]
+        if len(rows) > SEARCH_PAGE:
+            out.append(f"More entries: repeat get_knowledge with the same query and start={start + SEARCH_PAGE}.")
+        return "\n".join(out)

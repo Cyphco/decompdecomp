@@ -125,14 +125,21 @@ def _manifest(files: dict[str, str], cfg: dict) -> dict:
         layout = {f["name"]: f for f in manifest.get("layout", [])}
         if len(layout) != len(manifest.get("layout", [])):
             raise ValueError
+        # Older splits kept empty rows absorbed into another function, with their attempts and notes. Their
+        # layout omitted status; set_aside is the evidence that this is retained history, not a zero-byte function.
+        merged = {(item.get("name"), item.get("vram")) for item in manifest.get("set_aside", [])
+                  if isinstance(item, dict) and isinstance(item.get("asm_code"), str)
+                  and "(merged into it)" in item["asm_code"]}
         for name, entry in layout.items():
             if (not IDENT.fullmatch(name) or not isinstance(entry["vram"], int)
-                    or not isinstance(entry["size"], int) or entry["size"] <= 0
+                    or not isinstance(entry["size"], int) or entry["size"] < 0
+                    or entry["size"] == 0 and (name, entry["vram"]) not in merged
                     or entry.get("status", "open") not in ("open", "asm")):
                 raise ValueError
         compiler = manifest.get("compiler")
         if compiler is not None and not isinstance(compiler, dict):
             raise ValueError
+        saves._check_compiler_ranges(cfg, manifest)
         if not isinstance(manifest.get("symbols", []), list) or not isinstance(manifest.get("notes", []), list) \
                 or not isinstance(manifest.get("knowledge", []), list) \
                 or not isinstance(manifest.get("set_aside", []), list):
@@ -255,8 +262,17 @@ def _initial_merge(manifest: dict, projected: dict[str, str], disk: dict[str, st
                 pending[name] = projected[name]
     manifest["headers"] = headers
     for name, text in projected.items():
-        if name.startswith(("src/", "best/")) and name not in disk:
-            pending[name] = text
+        if name.startswith(("src/", "best/")):
+            if name not in disk:
+                pending[name] = text
+            elif not manifest.get("revision"):
+                # Before revisions, saves stripped source whitespace and Windows translated newlines. Recognize
+                # that exact old serialization, then restore the database spelling (including __LINE__-sensitive
+                # leading lines), rather than treating the serializer's output as a new source contribution.
+                old = text.strip() + "\n"
+                universal = lambda value: value.replace("\r\n", "\n").replace("\r", "\n")  # noqa: E731
+                if disk[name] in (universal(old), universal(old.replace("\n", "\r\n"))):
+                    pending[name] = text
     return manifest, pending
 
 
@@ -805,6 +821,7 @@ class Progress:
             if before is None and slug not in self.adopting:
                 changed = {name for name in changed if name in disk}
                 manifest, initial_pending = _initial_merge(manifest, comparison, disk)
+                changed.difference_update(name for name in initial_pending if name.startswith(("src/", "best/")))
             legacy_newer = set()
             if before is None and slug not in self.adopting:
                 # A database match newer than the folder's snapshot wins even when the folder has an older file of
@@ -846,7 +863,9 @@ class Progress:
                 if saves.MANIFEST in changed:
                     old = json.loads(comparison_manifest)
                     all_code |= any(old.get(key) != merged_manifest.get(key) for key in
-                                    ("compiler", "compiler_ranges", "symbols", "headers", "set_aside"))
+                                    ("compiler", "compiler_ranges", "headers", "set_aside"))
+                    all_code |= ({s["name"]: s for s in old.get("symbols", [])}
+                                 != {s["name"]: s for s in merged_manifest.get("symbols", [])})
                     if old.get("layout") != merged_manifest.get("layout"):
                         old_layout = {f["name"]: (f["vram"], f["size"]) for f in old.get("layout", [])}
                         new_layout = {f["name"]: (f["vram"], f["size"]) for f in merged_manifest.get("layout", [])}

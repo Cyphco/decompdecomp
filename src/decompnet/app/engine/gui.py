@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 from ... import compilermap, consoles, scoring, toolchains
-from ...network import IN_BUILD, PROGRESS_COLUMNS, set_aside
+from ...network import IN_BUILD, PROGRESS_COLUMNS, NetworkError, set_aside
 from ...project import compiler_for
 
 # What the notification centre tells: news a person wants to hear about, not every claim and attempt agents make.
@@ -35,6 +35,11 @@ class GuiMixin:
             return {"path": self._project(slug)["root"], "identical": None}
         from ...rom.export import export_rom
 
+        # Directory timestamps don't reveal edits inside an existing source file. Export must judge those edits
+        # and refuse conflicted progress before it replaces the last rebuildable tree.
+        self.progress.sync(slug, force=True, logger=log)
+        if slug in self.progress.blocked:
+            raise NetworkError(self.progress.errors[slug])
         proj = self._project(slug)
         console = self.console(proj)
         res = console.export(self, slug, Path(proj["root"]) / "source", log=log)  # its own (the GBA's), or splat's

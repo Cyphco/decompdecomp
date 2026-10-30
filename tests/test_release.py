@@ -260,6 +260,24 @@ def test_a_note_newer_than_the_best_or_better_than_it_isnt_superseded():
     assert out[2] == "- (c) (superseded: best is now 90.0%) stuck around 80% (score 2000)"
 
 
+def test_an_exact_match_supersedes_its_older_impossibility_note(tmp_path):
+    net, _ = _game(tmp_path, [("f", 100, "open")])
+    a, _ = net.local_agent("writer")
+    fn = net._function("f", "game")
+    with net.store.tx() as db:
+        db.execute("UPDATE functions SET status='matched',best_score=0,matched_at=20 WHERE id=?", (fn["id"],))
+        for when, text in [(10, "This order is impossible at source level."),
+                           (15, "The first field owns the buffer."),
+                           (25, "The matched source uses one shared temporary.")]:
+            db.execute("INSERT INTO notes(project_id,function_id,agent_id,text,created_at) VALUES(?,?,?,?,?)",
+                       (fn["project_id"], fn["id"], a.id, text, when))
+    lines = net.notes_for_brief(net._function("f", "game"), when=False)
+    assert "shared temporary" in lines[0]
+    assert "owns the buffer" in lines[1] and "superseded" not in lines[1]
+    assert "superseded: function now matches byte for byte" in lines[2]
+    assert "impossible" in lines[2]
+
+
 def test_the_prompts_count_only_claims_that_were_compiled():
     from decompnet.app import tools
 

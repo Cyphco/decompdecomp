@@ -437,7 +437,12 @@ Where to start on a gap:
 - **Polish matched code** (ROM projects): helpers give matched functions real names, types and a comment; a change
   counts only when the function still matches. The project shows matched and readable.
 - **Shared knowledge**: what agents learn about a game reaches every agent once helpers of two different models
-  agree on it.
+  agree on it. Full explanations and code (up to 16,000 characters) stay intact; only prompt previews are shortened.
+  `get_knowledge` searches entries or reads one in full, including its current status. Existing clipped text cannot
+  be recovered automatically. A matched function's older impossibility notes are marked superseded in its brief.
+- **Exports follow progress edits**: exporting forces a progress check before replacing the rebuildable tree, so
+  edits inside existing files are judged first. Imported compiler ranges must fit the game's code, while an
+  unchanged legacy mistake can still be opened and repaired. GBA exports retain inline helper bodies locally.
 - **Twins across your games**: code matched in one of your games is tried on the identical functions of the others
   (libraries, the compiler's runtime). No agent time; nothing leaves your computer.
 - **A real permuter**: decomp-permuter rewrites near misses on the parse tree, weighted per compiler, on spare

@@ -649,11 +649,23 @@ def _saved_source(folder: Path, files: dict[str, str] | None, name: str) -> str 
     return path.read_text(encoding="utf-8") if path.exists() else None
 
 
+def _check_compiler_ranges(cfg: dict, manifest: dict) -> None:
+    """A contributed range must fit the ROM, but an existing mistake must remain openable for repair."""
+    from .engine.compilers import in_game
+
+    for part in manifest.get("compiler_ranges") or []:
+        # Unknown compilers use the restore's existing fallback below. An unchanged legacy range may already be
+        # invalid: rejecting it would prevent Check again from opening the project to remove it.
+        if part not in (cfg.get("compiler_ranges") or []) and toolchains.known(str(part.get("toolchain") or "")):
+            in_game(cfg, [[part["start"], part["end"]]])
+
+
 def _apply_context(net, slug: str, folder: Path, manifest: dict, log,
                    files: dict[str, str] | None = None) -> tuple[dict, dict]:
     """Put back everything a save changes before its C is judged: layout, names, settings, notes, set-aside."""
     check_cancel = getattr(log, "check_cancel", lambda: None)
     proj = net._project(slug)
+    _check_compiler_ranges(net.cfg(proj), manifest)
     pid = proj["id"]
     log("putting back the function splits and names")
     layout = manifest.get("layout") or []
@@ -738,11 +750,10 @@ def _judge_saved(net, slug: str, folder: Path, manifest: dict, by_name: dict, sa
     by_vram: dict[int, list[str]] = {}
     for name, row in by_name.items():
         by_vram.setdefault(row["vram"], []).append(name)
-    matched, lost, best = 0, [], 0
-    log(f"judging {len(saved)} saved functions again")
+    matched, lost, best, checked = 0, [], 0, 0
+    log(f"reading progress for {len(saved)} saved functions")
     for old_name, info in saved.items():
         check_cancel()
-        log(f"checking {old_name}")
         kind = "src" if "matched_by" in info else "best"
         text = _saved_source(folder, files, f"{kind}/{old_name}.c")
         row = by_name.get(old_name)
@@ -770,6 +781,8 @@ def _judge_saved(net, slug: str, folder: Path, manifest: dict, by_name: dict, sa
             continue
         credit, _ = net.local_agent((info.get("matched_by") or info.get("best_by") or "restored"))
         agent, _ = net.local_agent("progress-judge")
+        log(f"checking {old_name}")
+        checked += 1
         try:
             result = net.attempt(agent, name, text, slug)
         except (NetworkError, toolchains.ToolchainError) as e:
@@ -795,7 +808,8 @@ def _judge_saved(net, slug: str, folder: Path, manifest: dict, by_name: dict, sa
                 lost.append(name)
         else:
             best += 1
-    log(f"restored: {matched} matched functions, {best} best attempts" + (f"; {len(lost)} no longer match" if lost else ""))
+    log(f"restored: {matched} matched functions, {best} best attempts; {checked} source checks"
+        + (f"; {len(lost)} no longer match" if lost else ""))
     return {"matched": matched, "best": best, "lost": lost}
 
 

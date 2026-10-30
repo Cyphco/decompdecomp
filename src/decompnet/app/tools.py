@@ -324,6 +324,8 @@ HANDLERS: dict[str, Callable[..., str]] = {
     "list_functions": lambda net, agent, slug, status="open", limit=40: net.list_functions(slug, status, limit),
     "add_note": lambda net, agent, slug, text, function="": _add_note(net, agent, slug, text, function),
     "share_knowledge": lambda net, agent, slug, text="", supports=0: net.knowledge.share(agent, slug, text, supports),
+    "get_knowledge": lambda net, agent, slug, number=0, query="", start=0:
+        net.knowledge.read(slug, number, query, start),
     "search_flags": lambda net, agent, slug, function, compiler="", source="":
         net.search_flags(agent, slug, function, compiler, source),
     "claim_readable": lambda net, agent, slug: net.readability.claim(agent, slug),
@@ -350,7 +352,7 @@ HANDLERS: dict[str, Callable[..., str]] = {
 
 READ_ONLY = frozenset({"project_info", "get_function", "last_diff", "get_context", "read_data", "get_class",
                        "guess_struct", "compiler_map", "list_functions", "search_flags", "search_notes",
-                       "find_similar", "guide", "read_file", "search_code", "file_status"})
+                       "find_similar", "guide", "read_file", "search_code", "file_status", "get_knowledge"})
 
 ROM_ONLY = {"get_context", "edit_context", "split_function", "redraft", "search_flags"}
 FORK_ONLY = {"read_file", "search_code", "edit_file", "file_status", "split_file", "join_functions", "tidy_done"}
@@ -608,8 +610,17 @@ def build_mcp(net: RomNetwork, agent_of: Callable[[Context], tuple[Agent, str]])
     async def share_knowledge(ctx: Context, text: str = "", supports: int = 0) -> str:
         """Propose something every agent on this game should know (a convention, what a struct is, how the code
         is organised), or back an open proposal with supports=its number. It reaches every agent once helpers
-        running two different models agree. Not for which compiler built what: that's the compiler map's job."""
+        running two different models agree. Full text and code are kept (up to 16000 characters); only prompt previews
+        are shortened. Read a proposal with get_knowledge before backing it. Not for which compiler built what:
+        that's the compiler map's job."""
         return await run(ctx, "share_knowledge", text=text, supports=supports)
+
+    @mcp.tool(meta=ALWAYS_LOAD)
+    async def get_knowledge(ctx: Context, number: int = 0, query: str = "", start: int = 0) -> str:
+        """Read a complete knowledge entry by number, or search this project's entries by literal text. Search
+        includes status and rejected entries so an old hypothesis isn't mistaken for accepted knowledge; start
+        pages through results. Use this before backing a shortened proposal."""
+        return await run(ctx, "get_knowledge", number=number, query=query, start=start)
 
     @mcp.tool(meta=ALWAYS_LOAD)
     async def suggest(ctx: Context, text: str, compiler: str = "", flags: str = "", function: str = "",

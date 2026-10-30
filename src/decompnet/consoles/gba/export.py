@@ -95,11 +95,18 @@ def export_gba(net, slug: str, out: Path, log=print) -> dict:
 def standalone_source(source: str, name: str) -> str:
     """A batch attempt may include other game functions; each exported file must define just its own.
 
-    Keep their signatures as prototypes. The caller rechecks the resulting C, since removing a definition can
-    change inlining, and retains assembly when it no longer matches.
+    Keep their signatures as prototypes, but retain inline helpers with local linkage: removing their bodies
+    changes the caller's code. The caller rechecks the resulting C and retains assembly when it no longer matches.
     """
     for other, start, body, end in reversed(_definitions(source)):
-        if other != name and not re.search(r"\bstatic\b|\btemplate\b|::", source[start:body]):
+        prefix = csource._blank(source[start:body])
+        if other != name and not re.search(r"\bstatic\b|\btemplate\b|::", prefix):
+            if re.search(r"\b(?:inline|__inline|__inline__)\b", prefix):
+                # GNU extern inline already emits no external definition. Plain inline helpers must be local
+                # so several exported functions can use the same helper name without duplicate definitions.
+                if not re.search(r"\bextern\b", prefix):
+                    source = source[:start] + "\nstatic " + source[start:].lstrip()
+                continue
             source = source[:start] + source[start:body].rstrip() + ";" + source[end:]
     # Automatic data names denote existing ROM/RAM addresses. A tentative definition would allocate a new COMMON
     # object instead (a GBA game's u8 D_080FA7E2[]), although the single-function judge resolves the original name.
