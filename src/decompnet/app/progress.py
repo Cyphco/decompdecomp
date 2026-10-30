@@ -791,6 +791,28 @@ class Progress:
                 return result
         disk = _read(folder)
         snapshot = _Snapshot.of(disk)
+        if baseline is not None and not db_changed and not config_changed:
+            changed_files = {name for name in snapshot.files.keys() | baseline.disk.files.keys()
+                             if snapshot.files.get(name) != baseline.disk.files.get(name)}
+            if changed_files == {saves.MANIFEST} and saves.MANIFEST in disk:
+                manifest = _manifest(disk, cfg)
+                previous = json.loads(baseline.disk.manifest)
+                current = json.loads(disk[saves.MANIFEST])
+                projected_manifest = json.loads(baseline.projected.manifest)
+                bookkeeping = {"saved_at", "revision"}
+                revision = current.get("revision")
+                if (isinstance(revision, int) and not isinstance(revision, bool)
+                        and revision >= max(1, saves._stored_revision(cfg))
+                        and {key: value for key, value in current.items() if key not in bookkeeping}
+                        == {key: value for key, value in previous.items() if key not in bookkeeping}
+                        == {key: value for key, value in projected_manifest.items() if key not in bookkeeping}):
+                    # Save now only advanced its timestamp/revision. Reapplying the unchanged context would
+                    # delete and recreate every note, and can stall the next attempt on a large project.
+                    saves._remember_revision(net, slug, manifest)
+                    self._remember_changes(pid, {saves.MANIFEST: disk[saves.MANIFEST]},
+                                           disk[saves.MANIFEST], config_key, baseline.dirty_token, [])
+                    self.published[slug] = {saves.MANIFEST}
+                    return True
         if baseline is not None and snapshot.files == baseline.disk.files:
             if not db_changed and not config_changed:
                 return False

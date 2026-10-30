@@ -80,6 +80,7 @@ class CompilerConfig:
     wsl: bool = False  # a Linux toolchain on Windows: runs inside WSL 2, `cmd` holds WSL paths (see wsl.py)
     prelude: str = ""  # the toolchain's prelude (Toolchain.prelude)
     cplusplus: bool = False  # it compiles C++ too: what doesn't compile as C is tried as C++ (Toolchain.cplusplus)
+    language: str = "c"  # a C++-only command uses "c++"; dual-language commands still start with C
 
 
 @dataclass
@@ -170,8 +171,8 @@ def run_in(cfg: CompilerConfig, work: Path, argv: list[str], timeout: float = 30
 
 def compile_source(cfg: CompilerConfig, context_header: str, source: str, trusted: bool = False) -> CompileResult:
     """Compile one function's C with the project's compiler in the sandbox, with the shared header as context.h.
-    Agents' C (not `trusted`) is checked first. C++ is tried for what doesn't compile as C when the toolchain builds
-    both."""
+    Agents' C (not `trusted`) is checked first. Dual-language toolchains try C before C++; a declared C++-only
+    command goes straight to C++."""
     if not trusted:
         try:
             check_source(source)
@@ -192,6 +193,10 @@ def compile_source(cfg: CompilerConfig, context_header: str, source: str, truste
         # LF on every platform: to the old GCCs a backslash before CRLF doesn't continue a line ("stray '\' in program")
         (inc / "context.h").write_text(context_header, encoding="utf-8", newline="\n")
         root = _root(cfg, work)
+        if cfg.language == "c++":
+            # A registry-declared C++-only wrapper rejects .c before invoking its compiler. Skipping that
+            # impossible attempt saves a subprocess (and a WSL staging round trip), without guessing from C.
+            return _compile_as(cfg, work, root, source, "cpp")
         result = _compile_as(cfg, work, root, source, "c")
         # C++ for what doesn't compile as C (a class's method, new, templates): C stays C, so what matched as C
         # still compiles exactly as it did (GTA San Andreas is C++; 1,222 of its functions matched as C)
