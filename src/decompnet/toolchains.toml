@@ -969,6 +969,7 @@ platform = "GBA"
 arch = "arm"
 license = "GPL-2.0; STLport and HP/SGI permissive headers"
 source = "notyourav/agbcc cp release; STLPORT41B4; StanHash/fomt libagbc++"
+language = "c++" # this wrapper rejects every .c input before running the compiler
 description = "The historical GBA C++ frontend and STLport vector implementation; select only for functions proven with C++."
 cc = ["{tc}/bin/agbcp"]
 flags = ["-quiet", "-fno-exceptions", "-fno-rtti", "-fvtable-thunks", "-mthumb-interwork", "-O2", "-fhex-asm"]

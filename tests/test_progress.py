@@ -54,6 +54,90 @@ def manifest(folder, **changes):
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
+def test_save_bookkeeping_does_not_restore_notes_or_judge(project, monkeypatch):
+    net, folder, judged = project
+    agent, _ = net.local_agent("writer")
+    net.add_note(agent, "game", "keep this note's identity", "f")
+    net.progress.sync("game", force=True)
+    before = [tuple(r) for r in net.store.all("SELECT * FROM notes")]
+    saves.save(net, "game")
+    saved = json.loads((folder / saves.MANIFEST).read_text())
+    monkeypatch.setattr(saves, "_apply_context", lambda *a, **kw: pytest.fail("restored unchanged context"))
+    assert net.progress.sync("game", force=True)
+    assert not net.progress.sync("game", force=True)
+    assert [tuple(r) for r in net.store.all("SELECT * FROM notes")] == before
+    assert net.cfg(net._project("game"))["progress_revision"] == saved["revision"]
+    assert judged == []
+
+
+def test_save_bookkeeping_does_not_hide_a_source_edit(project):
+    net, folder, judged = project
+    saves.save(net, "game")
+    (folder / "src").mkdir(exist_ok=True)
+    (folder / "src/f.c").write_text("good edited C", encoding="utf-8")
+    assert net.progress.sync("game", force=True)
+    assert judged == [("f", "good edited C")]
+
+
+def test_save_bookkeeping_does_not_hide_a_metadata_edit(project):
+    net, folder, _ = project
+    saves.save(net, "game")
+    manifest(folder, instructions="contributor's instructions")
+    assert net.progress.sync("game", force=True)
+    assert net.cfg(net._project("game"))["instructions"] == "contributor's instructions"
+
+
+def test_save_bookkeeping_keeps_a_concurrent_database_note(project, monkeypatch):
+    net, folder, _ = project
+    agent, _ = net.local_agent("writer")
+    saves.save(net, "game")
+    original = net.progress._remember_changes
+
+    def remember(*args, **kwargs):
+        net.add_note(agent, "game", "arrived during acknowledgement", "g")
+        original(*args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(net.progress, "_remember_changes", remember)
+        assert net.progress.sync("game", force=True)
+    net.progress.sync("game", force=True)
+    saved = json.loads((folder / saves.MANIFEST).read_text())
+    assert any(n["text"] == "arrived during acknowledgement" for n in saved["notes"])
+
+
+@pytest.mark.parametrize("revision", [0, -1, True, "new"])
+def test_save_bookkeeping_still_repairs_invalid_or_old_revisions(project, revision):
+    net, folder, _ = project
+    saves.save(net, "game")
+    stored = net.cfg(net._project("game"))["progress_revision"]
+    manifest(folder, revision=revision)
+    net.progress.sync("game", force=True)
+    saved = json.loads((folder / saves.MANIFEST).read_text())
+    assert isinstance(saved["revision"], int) and not isinstance(saved["revision"], bool)
+    assert saved["revision"] >= stored
+
+
+def test_save_bookkeeping_preserves_a_distinct_projected_baseline(project, monkeypatch):
+    net, folder, _ = project
+    saves.save(net, "game")
+    pid = net._project("game")["id"]
+    baseline = net.progress._baseline(pid)
+    projected = json.loads(baseline.projected.manifest)
+    projected["instructions"] = "different rendered state"
+    baseline.projected.manifest = json.dumps(projected)
+    applied = []
+    original = saves._apply_context
+
+    def apply(*args, **kwargs):
+        applied.append(True)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(saves, "_apply_context", apply)
+    manifest(folder, saved_at=time.time() + 1)
+    net.progress.sync("game", force=True)
+    assert applied
+
+
 def test_a_new_source_is_discovered_without_editing_the_function_index(project):
     net, folder, judged = project
     (folder / "src").mkdir()

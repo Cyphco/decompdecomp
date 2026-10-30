@@ -42,12 +42,15 @@ def compiler_config(root: Path, cfg: dict) -> CompilerConfig:
     runtime32 = None
     linux = False
     prelude, cplusplus = "", False
+    language = "c"
     if "toolchain" in c:
         try:
             tc = toolchains.get(c["toolchain"])
         except toolchains.ToolchainError:
             raise toolchains.ToolchainError(unknown_compiler_message(c["toolchain"])) from None
         prelude, cplusplus = tc.prelude, tc.cplusplus
+        if not c.get("cmd"):
+            language = tc.language  # a custom command may support different languages than the registry's
         linux = tc.via_wsl  # Windows: a Linux toolchain, run inside WSL 2
         if linux and not (ok := wsl.status())[0]:
             raise toolchains.ToolchainError(f"{tc.name} is a Linux program: on Windows it runs in WSL 2. {ok[1]}")
@@ -95,4 +98,5 @@ def compiler_config(root: Path, cfg: dict) -> CompilerConfig:
         wsl=linux,
         prelude=prelude,
         cplusplus=cplusplus,
+        language=language,
     )
