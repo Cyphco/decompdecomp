@@ -14,6 +14,7 @@ import json
 import re
 import shutil
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from ...forks import csource
@@ -43,27 +44,42 @@ def export_gba(net, slug: str, out: Path, log=print) -> dict:
     (out / "include" / "common.h").write_text(net._context(proj["id"])["header"], encoding="utf-8")
 
     log("checking the matched functions and writing them as C")
-    functions, fallback = [], []
-    for row in rows:
+    def prepare(row):
         reason = json.loads(row["meta"] or "{}").get("asm_code", "")
         if reason.startswith("not code") or "(merged into it)" in reason:
-            continue  # data and absorbed blocks must not force luvdis to invent function starts
+            return None  # data and absorbed blocks must not force luvdis to invent function starts
         thumb = "arm_func_start" not in (row["asm"] or "")
         f = {"name": row["name"], "addr": row["vram"], "size": len(row["target"]), "thumb": thumb}
-        functions.append(f)
         if row["status"] != "matched" or not row["matched_source"]:
-            continue
+            return f, None, None
         row = dict(row)
         row["matched_source"] = standalone_source(row["matched_source"], row["name"])
         why = _check_c(net, proj, row, thumb, units, f)
-        if why:
-            fallback.append((row["name"], why))
-            continue
-        suffix = "cpp" if f.get("language") == "c++" else "c"
-        src = out / "src" / f"{row['name']}.{suffix}"
-        src.parent.mkdir(exist_ok=True)
-        src.write_text(f'#include "common.h"\n\n{row["matched_source"].strip()}\n', encoding="utf-8")
-        f["c"] = src.relative_to(out).as_posix()
+        return f, row["matched_source"], why
+
+    # Each sandboxed compile is independent. Keep the same bounded concurrency as regression checks; map keeps
+    # address order deterministic, and only this thread writes the export tree and collects failures.
+    functions, fallback = [], []
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        try:
+            for prepared in pool.map(prepare, rows):
+                if prepared is None:
+                    continue
+                f, source, why = prepared
+                functions.append(f)
+                if why:
+                    fallback.append((f["name"], why))
+                    continue
+                if source is None:
+                    continue
+                suffix = "cpp" if f.get("language") == "c++" else "c"
+                src = out / "src" / f"{f['name']}.{suffix}"
+                src.parent.mkdir(exist_ok=True)
+                src.write_text(f'#include "common.h"\n\n{source.strip()}\n', encoding="utf-8")
+                f["c"] = src.relative_to(out).as_posix()
+        except BaseException:
+            pool.shutdown(wait=True, cancel_futures=True)
+            raise
 
     names = {f["name"] for f in functions}
     symbols = {s.name: s.address for s in syms.by_name.values() if s.name not in names and not AUTO_NAME.match(s.name)}

@@ -443,6 +443,8 @@ Where to start on a gap:
 - **Exports follow progress edits**: exporting forces a progress check before replacing the rebuildable tree, so
   edits inside existing files are judged first. Imported compiler ranges must fit the game's code, while an
   unchanged legacy mistake can still be opened and repaired. GBA exports retain inline helper bodies locally.
+  Their independent source checks and C object builds run with at most eight workers, retaining deterministic
+  linker order, assembly fallbacks for failed checks, and the final byte-for-byte rebuild test.
 - **Twins across your games**: code matched in one of your games is tried on the identical functions of the others
   (libraries, the compiler's runtime). No agent time; nothing leaves your computer.
 - **A real permuter**: decomp-permuter rewrites near misses on the parse tree, weighted per compiler, on spare
