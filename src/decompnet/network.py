@@ -247,7 +247,7 @@ def brief_notes(rows, fn, best_at: float | None = None, best_text: str = "", sho
     that doesn't match matches (stale_note): on an Xbox game three of a function's six note slots held such notes
     while the finding that got it to 92% came after them. At most `show` (BRIEF_NOTES)."""
     show = BRIEF_NOTES if show is None else show
-    best_score = fn["best_score"] if fn["status"] != "matched" else None
+    best_score = fn["best_score"] if fn["status"] != "matched" else 0
     best_percent = None
     if best_score is not None and fn["n_insns"]:
         best_percent = max(0.0, 100.0 * (1 - best_score / (fn["n_insns"] * 100)))
@@ -278,7 +278,8 @@ def brief_notes(rows, fn, best_at: float | None = None, best_text: str = "", sho
     for n, count, old in (fresh + stale)[:show]:
         text = stale_note((n["text"] or "").strip(), fn["status"])
         if old:
-            text = f"(superseded: best is now {best_text or fn['best_score']}) {text}"
+            reason = "function now matches byte for byte" if fn["status"] == "matched" else f"best is now {best_text or fn['best_score']}"
+            text = f"(superseded: {reason}) {text}"
         if count > 1:
             text += f" [noted {count} times]"
         who = f"{n['name']}, {_ago(n['created_at'])}" if when else f"{n['name']}"
@@ -957,7 +958,7 @@ class Network:
         """A function's notes for its brief (brief_notes), with when its best score was first reached."""
         rows = self.store.all("SELECT n.text, n.created_at, a.name FROM notes n LEFT JOIN agents a ON a.id=n.agent_id "
                               f"WHERE n.function_id=? ORDER BY n.id DESC LIMIT {BRIEF_NOTES * 8}", fn["id"])
-        best_at = None
+        best_at = fn["matched_at"] if fn["status"] == "matched" else None
         if fn["status"] != "matched" and fn["best_score"] is not None:
             row = self.store.one("SELECT MIN(created_at) AS t FROM attempts WHERE function_id=? AND score=?",
                                  fn["id"], fn["best_score"])
@@ -1364,4 +1365,6 @@ class Network:
             for table in ("notes", "events", "context_versions", "functions", "symbols", "twin_misses"):
                 db.execute(f"DELETE FROM {table} WHERE project_id=?", (proj["id"],))
             db.execute("DELETE FROM projects WHERE id=?", (proj["id"],))
+        if progress := getattr(self, "progress", None):
+            progress.forget(slug, proj["id"])
         return len(ids)

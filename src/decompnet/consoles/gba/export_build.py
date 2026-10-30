@@ -17,6 +17,7 @@ import json
 import re
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -148,11 +149,10 @@ def build_objects() -> tuple[list[dict], dict[str, str]]:
             run([arm("as"), *AS_FLAGS, "-o", p["obj"], assembly_input(p)])
         if index + 1 < len(pieces) and pieces[index + 1]["addr"] % 4:
             trim(target, extent=pieces[index + 1]["addr"] - p["addr"])
-    c_objs = {}
-    for fn in B["functions"]:
+    def compile_one(fn):
         src = c_source(fn)
         if not src:
-            continue
+            return None
         cfg = compiler_config(ROOT, {"compiler": B["compiler"] | fn.get("compiler", {})})
         obj = f"build/{Path(src).with_suffix('.o').as_posix()}"
         (ROOT / obj).parent.mkdir(parents=True, exist_ok=True)
@@ -163,7 +163,15 @@ def build_objects() -> tuple[list[dict], dict[str, str]]:
             fail(f"compiling {src} failed:\n{res.log[-3000:]}")
         (ROOT / obj).write_bytes(res.obj)
         trim(ROOT / obj, 2 if fn["addr"] % 4 else 4)
-        c_objs[fn["name"]] = obj
+        return fn["name"], obj
+
+    # Every function writes its own object. Bound compiler processes while keeping manifest order for the linker.
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        try:
+            c_objs = dict(result for result in pool.map(compile_one, B["functions"]) if result is not None)
+        except BaseException:
+            pool.shutdown(wait=True, cancel_futures=True)
+            raise
     return pieces, c_objs
 
 
@@ -354,7 +362,9 @@ def build() -> bool:
     items = layout(pieces, c_objs)
     (ROOT / "build" / "game.ld").write_text(linker_script(items, c_objs), encoding="utf-8")
     objs = sorted({obj for _, obj, _ in items} | set(c_objs.values()))
-    run([arm("ld"), "-e", f"0x{B['base']:X}", "-T", "build/game.ld", "-o", "build/game.elf", *objs])
+    # the objects in a file ld reads (@file): a GBA game's 3,800 of them made a command line longer than Windows takes
+    (ROOT / "build" / "objects.txt").write_text("".join(f'"{obj}"\n' for obj in objs), encoding="utf-8")
+    run([arm("ld"), "-e", f"0x{B['base']:X}", "-T", "build/game.ld", "-o", "build/game.elf", "@build/objects.txt"])
     run([arm("objcopy"), "-O", "binary", "build/game.elf", B["output"]])
     out, base = (ROOT / B["output"]).read_bytes(), (ROOT / B["image"]).read_bytes()
     if out == base:

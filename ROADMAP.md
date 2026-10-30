@@ -417,6 +417,9 @@ Where to start on a gap:
 - **Room presence during slow syncs.** A separate heartbeat keeps members online while importing the host's work
   or rebuilding a source project. Sync failures and recovery are logged, and syncing continues automatically
   after a temporary connection failure. Applies to ROM and project rooms on every console.
+- **Bring saved ROM progress into a room.** When joining with a game already imported, saved matches the host has
+  not matched yet are submitted for the host to verify. Better unfinished attempts are shared when both projects
+  use the same compiler settings; functions whose layout or name differs are skipped.
 - **A standalone app.** Its own window (GTK and WebKitGTK) and a tray icon, so closing the window doesn't stop
   helper agents; **Quit** ends everything the app started. Only helpers the app starts work on projects: the old
   `decomp mcp` bridge is gone, and the first start removes its registrations from your agents. A development copy is
@@ -434,7 +437,14 @@ Where to start on a gap:
 - **Polish matched code** (ROM projects): helpers give matched functions real names, types and a comment; a change
   counts only when the function still matches. The project shows matched and readable.
 - **Shared knowledge**: what agents learn about a game reaches every agent once helpers of two different models
-  agree on it.
+  agree on it. Full explanations and code (up to 16,000 characters) stay intact; only prompt previews are shortened.
+  `get_knowledge` searches entries or reads one in full, including its current status. Existing clipped text cannot
+  be recovered automatically. A matched function's older impossibility notes are marked superseded in its brief.
+- **Exports follow progress edits**: exporting forces a progress check before replacing the rebuildable tree, so
+  edits inside existing files are judged first. Imported compiler ranges must fit the game's code, while an
+  unchanged legacy mistake can still be opened and repaired. GBA exports retain inline helper bodies locally.
+  Their independent source checks and C object builds run with at most eight workers, retaining deterministic
+  linker order, assembly fallbacks for failed checks, and the final byte-for-byte rebuild test.
 - **Twins across your games**: code matched in one of your games is tried on the identical functions of the others
   (libraries, the compiler's runtime). No agent time; nothing leaves your computer.
 - **A real permuter**: decomp-permuter rewrites near misses on the parse tree, weighted per compiler, on spare
@@ -456,7 +466,10 @@ Where to start on a gap:
   native open/save panels, downloads, Edit/Reload/Quit menus and the page's close confirmation. A uv source
   installer creates a Finder app in `~/Applications`. Intel and Apple Silicon CI exercise portable regressions
   and the hidden native window. KMC GCC/binutils require Rosetta on Apple Silicon; unavailable Linux-only
-  compilers remain unavailable. Mac workers use per-thread QoS so they don't lower the whole app's priority.
+  compilers remain unavailable. PS1 GCC 2.6.3 builds natively from pinned source on Intel and Apple Silicon Macs
+  with Xcode Command Line Tools; GCC 2.7.2 and 2.8.1 use pinned native Apple Silicon builds with maspsx. The
+  assembler helper uses the app's Python rather than Apple's older system Python. Mac workers use per-thread QoS
+  so they don't lower the whole app's priority.
 - **Linux packages**: a `.deb`, an `.rpm` and an AppImage with their own Python, built for each release.
 - **Windows native app**: a WebView2 window, Start menu and desktop shortcuts, and a native tray icon.
   A custom native caption follows the app's theme, with Windows resizing, snapping and drag-to-restore. Scrollbars

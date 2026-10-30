@@ -92,6 +92,9 @@ def test_export_rebuilds_the_rom(gba):
     assert out["matched"] == len(FUNCTIONS) and not out["fallback"]
     root = Path(out["path"])
     assert "g_player" in (root / "src" / "player_take_damage.c").read_text()
+    # ld reads the objects from a file: a GBA game's 3,800 on the command line were too long for Windows
+    listed = (root / "build" / "objects.txt").read_text().split()
+    assert '"build/src/game_tick.o"' in listed and len(listed) > len(FUNCTIONS)
     linked = (root / "build" / "game.ld").read_text()  # a matched function links its C, not its assembly
     assert "build/src/game_tick.o(.text)" in linked and "build/asm/game_tick.o" not in linked
     assert (root / "asm" / "game_tick.s").exists()  # the assembly stays as the reference

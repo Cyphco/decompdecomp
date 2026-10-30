@@ -421,8 +421,13 @@ def api_tool_schemas(fork: bool = False, names: list[str] | None = None) -> list
         "make_readable": ("A readable rewrite of a matched function (names, types, a comment); kept only if it still "
                           "matches byte for byte.", s(function=st("function", True), source=st("readable C", True))),
         "share_knowledge": ("Propose something every agent on this game should know, or back proposal #N "
-                            "(supports=N). It counts once two different models agree. Not for compiler questions.",
+                            "(supports=N). Full text/code up to 16000 characters is kept. Read shortened proposals "
+                            "with get_knowledge before backing them. Two different models must agree. Not for compiler questions.",
                             s(text=st("what every agent should know"), supports=it("a proposal's number to back"))),
+        "get_knowledge": ("Read full knowledge by number, or search this project's entries by literal text. "
+                          "Status includes rejected hypotheses; start pages through results.",
+                          s(number=it("entry number; zero searches"), query=st("literal search text"),
+                            start=it("search result offset, default zero"))),
         "suggest": ("Suggest a setup change for the user (another compiler or flags), with evidence.",
                     s(text=st("what and why", True), compiler=st("toolchain id"), flags=st("flags"),
                       function=st("a function whose best attempt should match with it: checked now"),

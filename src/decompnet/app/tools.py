@@ -324,6 +324,8 @@ HANDLERS: dict[str, Callable[..., str]] = {
     "list_functions": lambda net, agent, slug, status="open", limit=40: net.list_functions(slug, status, limit),
     "add_note": lambda net, agent, slug, text, function="": _add_note(net, agent, slug, text, function),
     "share_knowledge": lambda net, agent, slug, text="", supports=0: net.knowledge.share(agent, slug, text, supports),
+    "get_knowledge": lambda net, agent, slug, number=0, query="", start=0:
+        net.knowledge.read(slug, number, query, start),
     "search_flags": lambda net, agent, slug, function, compiler="", source="":
         net.search_flags(agent, slug, function, compiler, source),
     "claim_readable": lambda net, agent, slug: net.readability.claim(agent, slug),
@@ -348,9 +350,11 @@ HANDLERS: dict[str, Callable[..., str]] = {
         net.forks.propose_join(agent, _fork(net, slug, "join_functions"), function, with_function, reason),
 }
 
-ROM_ONLY = {"get_context", "edit_context", "split_function",
-            "redraft",
-            "search_flags"}
+READ_ONLY = frozenset({"project_info", "get_function", "last_diff", "get_context", "read_data", "get_class",
+                       "guess_struct", "compiler_map", "list_functions", "search_flags", "search_notes",
+                       "find_similar", "guide", "read_file", "search_code", "file_status", "get_knowledge"})
+
+ROM_ONLY = {"get_context", "edit_context", "split_function", "redraft", "search_flags"}
 FORK_ONLY = {"read_file", "search_code", "edit_file", "file_status", "split_file", "join_functions", "tidy_done"}
 
 
@@ -380,12 +384,21 @@ def _named(net: RomNetwork, agent: Agent, slug: str, args: dict) -> dict:
     return args
 
 
+def _invoke(net: RomNetwork, agent: Agent, slug: str, name: str, args: dict) -> str:
+    """Every helper sees pulled changes before acting; only tools that write work need a second synchronization."""
+    net.progress.sync(slug, force=True)
+    result = HANDLERS[name](net, agent, slug, **_named(net, agent, slug, args))
+    if name not in READ_ONLY:
+        net.progress.sync(slug, force=True)
+    return result
+
+
 def call(net: RomNetwork, agent: Agent, slug: str, name: str, args: dict) -> str:
     """Run one tool for the built-in agent; errors come back as text the model can act on."""
     if name not in HANDLERS:
         return f"error: unknown tool {name!r}"
     try:
-        return HANDLERS[name](net, agent, slug, **_named(net, agent, slug, args))
+        return _invoke(net, agent, slug, name, args)
     except NetworkError as e:
         return f"error: {e}"
     except TypeError as e:
@@ -407,7 +420,7 @@ def build_mcp(net: RomNetwork, agent_of: Callable[[Context], tuple[Agent, str]])
         except NetworkError as e:
             raise ToolError(str(e)) from None
         try:
-            return await anyio.to_thread.run_sync(lambda: HANDLERS[name](net, agent, slug, **_named(net, agent, slug, args)))
+            return await anyio.to_thread.run_sync(lambda: _invoke(net, agent, slug, name, args))
         except NetworkError as e:
             raise ToolError(str(e)) from None
 
@@ -597,8 +610,17 @@ def build_mcp(net: RomNetwork, agent_of: Callable[[Context], tuple[Agent, str]])
     async def share_knowledge(ctx: Context, text: str = "", supports: int = 0) -> str:
         """Propose something every agent on this game should know (a convention, what a struct is, how the code
         is organised), or back an open proposal with supports=its number. It reaches every agent once helpers
-        running two different models agree. Not for which compiler built what: that's the compiler map's job."""
+        running two different models agree. Full text and code are kept (up to 16000 characters); only prompt previews
+        are shortened. Read a proposal with get_knowledge before backing it. Not for which compiler built what:
+        that's the compiler map's job."""
         return await run(ctx, "share_knowledge", text=text, supports=supports)
+
+    @mcp.tool(meta=ALWAYS_LOAD)
+    async def get_knowledge(ctx: Context, number: int = 0, query: str = "", start: int = 0) -> str:
+        """Read a complete knowledge entry by number, or search this project's entries by literal text. Search
+        includes status and rejected entries so an old hypothesis isn't mistaken for accepted knowledge; start
+        pages through results. Use this before backing a shortened proposal."""
+        return await run(ctx, "get_knowledge", number=number, query=query, start=start)
 
     @mcp.tool(meta=ALWAYS_LOAD)
     async def suggest(ctx: Context, text: str, compiler: str = "", flags: str = "", function: str = "",

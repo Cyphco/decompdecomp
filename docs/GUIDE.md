@@ -113,7 +113,7 @@ decompdecomp helps with these steps:
 | **Compiler map** | Big games mix compilers. The ROM map's Compiler view shows which compiler built each part of the game: from matches, from habits that rule a compiler out (`-G0` code never reads through `$gp`), and from the judge's survey, which builds agents' C with each compiler the project uses. A part the judge confirms becomes a suggestion. A suggested range applies only after a second, neighbouring function confirms it (a range check); a range that only one function supports, with the game's compiler on both sides, is a quirk. decompdecomp checks the ranges a project already has again by itself. Agents read it with `compiler_map`. MIPS for now. |
 | **Struct layouts** | decompdecomp reads every load and store through a function's pointer arguments and globals, along the call graph. The brief lists the likely fields of each pointer argument, and `guess_struct` writes the struct as C. MIPS (N64, PlayStation, PlayStation 2) for now. |
 | **Twins across your games** | Code that one of your games has matched is tried on the identical functions of your other games (libraries, the compiler's runtime). No agent time. |
-| **Shared knowledge** | Agents propose what they learn about a game. A proposal counts when helpers of two different models back it. Then it reaches every agent, after you accept it (or at once, a setting of each game). Run helpers of several models for this. |
+| **Shared knowledge** | Agents propose what they learn about a game. A proposal counts when helpers of two different models back it. Then it reaches every agent, after you accept it (or at once, a setting of each game). Run helpers of several models for this. Complete text and code are kept; `get_knowledge` searches entries or reads one in full with its current status. |
 | **C++ classes** | decompdecomp finds a C++ game's classes in its machine code: the vtables its constructors store, the base class of each, and every field its functions touch (offset, type). Agents read them with `get_class`, and `get_function` names the fields of `this` a function uses. MIPS (N64, PlayStation, PlayStation 2) for now. |
 | **Drafts** | m2c for MIPS, PowerPC and ARM. Ghidra (optional) for x86, AArch64 and other architectures. |
 | **Guides** | Agents get guides for each architecture and compiler, and for C++ and objdiff. |
@@ -131,7 +131,9 @@ decompdecomp helps with these steps:
 
 The app starts each helper itself, from **Start agents** in the project's header. A helper that stops starts again
 by itself. On a usage limit it waits until the limit resets. Five fast failures in a row pause it, and the app says
-why. Run several helpers, of different models: they work on different functions at the same time.
+why. Run several helpers, of different models: they work on different functions at the same time. Choose **Multiple
+models** in the launcher to pick several at once; the app remembers the choice. One start can begin at most 24
+helpers in total.
 
 Agents get only the tools of decompdecomp. They get no shell. They cannot access your files, except the source tree
 of a fork. The app installs missing agents and tells you how to sign in.
@@ -220,7 +222,8 @@ different build, which is planned.
   when you give its path (the game's folder, or its .exe; a dropped file comes alone): each DLL is a program of the
   project, with its source files in `src/auto/<its name>/`, its exports' names and its own Visual C++. The C
   runtime, DirectX wrappers, middleware (Miles, Bink, FMOD...), copy protection, ASI plugins and DLLs built long
-  after the game (mods) are left out, and the import's log says which and why.
+  after the game (mods) are left out, and the import's log says which and why. [VISUAL-CPP.md](VISUAL-CPP.md)
+  lists the Visual C++ builds decompdecomp has, how it picks one, and where their code changes.
 
 Please [report problems](https://github.com/n-delic/decompdecomp/issues). The status of a public decomp is the status
 of its own project.
@@ -281,9 +284,11 @@ Helper agents continue their work. To change this behavior, go to Settings.
 
 ## Your work
 
-**Saving.** decompdecomp saves the work on each N64, PlayStation and PlayStation 2 project by itself, every few minutes, as plain
+**Saving.** decompdecomp saves the work on each N64, PlayStation and PlayStation 2 project by itself as it changes, as plain
 files in the project's `progress/` folder: matched C, best attempts, headers, names, notes, compiler ranges and
 settings. It never saves the game. **Save now**, in the project's Settings, saves at once, also to another folder.
+You can edit files in `progress/` or pull another contributor's changes into it; decompdecomp reads them on the next
+project action and checks the saved functions again.
 `progress/` is the only part of a project to share or keep in git: matched C in `src/`, best attempts in `best/`, the
 shared headers in `include/`, and `decompdecomp.json` (the game's fingerprint, compiler, layout, names, notes and
 settings). The rest of the project's folder (the ROM, `asm/`, `assets/`, the build files) is made from your copy of
