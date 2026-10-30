@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 from ... import compilermap, consoles, scoring, toolchains
-from ...network import IN_BUILD, PROGRESS_COLUMNS, set_aside
+from ...network import IN_BUILD, PROGRESS_COLUMNS, NetworkError, set_aside
 from ...project import compiler_for
 
 # What the notification centre tells: news a person wants to hear about, not every claim and attempt agents make.
@@ -34,6 +34,11 @@ class GuiMixin:
         if self.fork_slug(slug):  # a fork's work is already in its source tree, committed
             return {"path": self._project(slug)["root"], "identical": None}
 
+        # Directory timestamps don't reveal edits inside an existing source file. Export must judge those edits
+        # and refuse conflicted progress before it replaces the last rebuildable tree.
+        self.progress.sync(slug, force=True, logger=log)
+        if slug in self.progress.blocked:
+            raise NetworkError(self.progress.errors[slug])
         proj = self._project(slug)
         res = self.console(proj).export_project(self, slug, Path(proj["root"]) / "source", log=log)
         with self.store.tx() as db:  # shown on the project page: what's in the tree and whether it rebuilds

@@ -101,3 +101,55 @@ def test_the_api_cannot_call_add_note_without_a_function():
 
     add_note = next(t["function"] for t in api_tool_schemas() if t["function"]["name"] == "add_note")
     assert "function" in add_note["parameters"]["required"]
+
+
+def test_a_long_recipe_keeps_its_code_and_is_readable_beyond_the_prompt_preview(net):
+    recipe = "Use the same temporary at both calls.\n\n```c\n" + "    use(&temporary);\n" * 70 + "```\nKeep the final copy."
+    net.knowledge.share(agent(net, "writer"), "game", recipe)
+    item = net.knowledge.listing("game")["items"][0]
+    assert item["text"] == recipe
+    prompt = net.knowledge.for_prompt("game")
+    assert f"get_knowledge(number={item['id']})" in prompt
+    assert "Keep the final copy." not in prompt
+    result = tools.call(net, agent(net, "reader"), "game", "get_knowledge", {"number": item["id"]})
+    assert recipe in result and "proposed" in result
+
+
+def test_oversized_knowledge_is_refused_without_saving_a_prefix(net):
+    from decompnet.app.knowledge import MAX_TEXT
+
+    with pytest.raises(NetworkError, match="Nothing was saved"):
+        net.knowledge.share(agent(net, "writer"), "game", "a" * (MAX_TEXT + 1))
+    assert net.knowledge.listing("game")["items"] == []
+
+
+def test_long_accepted_knowledge_does_not_hide_every_other_entry(net):
+    who = agent(net, "writer")
+    net.knowledge.share(who, "game", "The table is indexed by bytes.")
+    net.knowledge.share(who, "game", "Use this ownership recipe.\n" + "Separate the lifetimes.\n" * 150)
+    for item in net.knowledge.listing("game")["items"]:
+        net.knowledge.decide("game", item["id"], True)
+    prompt = net.knowledge.for_prompt("game")
+    assert "indexed by bytes" in prompt and "ownership recipe" in prompt and len(prompt) < 2800
+
+
+def test_knowledge_search_and_full_reads_are_scoped_to_the_project(net):
+    who = agent(net, "writer")
+    net.knowledge.share(who, "game", "Temporary lifetime recipe.")
+    item = net.knowledge.listing("game")["items"][0]
+    assert "Temporary lifetime" in net.knowledge.read("game", query="LIFETIME")
+    assert "No knowledge" in net.knowledge.read("other", query="lifetime")
+    with pytest.raises(NetworkError, match="no knowledge"):
+        net.knowledge.read("other", number=item["id"])
+    net.knowledge.decide("game", item["id"], False)
+    assert "rejected" in net.knowledge.read("game", number=item["id"])
+
+
+def test_knowledge_retrieval_reaches_api_and_cli_agents_in_both_modes():
+    from decompnet.agents.api import api_tool_schemas
+
+    assert "get_knowledge" in tools.READ_ONLY
+    for fork in (False, True):
+        assert "get_knowledge" in tools.tool_names(fork)
+        schema = next(t["function"] for t in api_tool_schemas(fork=fork) if t["function"]["name"] == "get_knowledge")
+        assert set(schema["parameters"]["properties"]) == {"number", "query", "start"}
