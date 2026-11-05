@@ -47,14 +47,17 @@ class GbaFunction:
         return len(self.code)
 
 
-def _luvdis(rom: Path, workdir: Path, cfg_in: Path | None) -> tuple[str, list[int]]:
-    """Run luvdis (in its own pinned environment) on the ROM and return (assembly, function addresses)."""
+def _luvdis(rom: Path, workdir: Path, cfg_in: Path | None, *, guess: bool = True) -> tuple[str, list[int]]:
+    """Run luvdis (in its own pinned environment) on the ROM and return (assembly, function addresses). `guess`
+    False: only the functions cfg_in names (the export's build.py disassembles the project's own split)."""
     python = toolchains.venv_bin(toolchains.ensure("luvdis", log=lambda *_: None) / "venv", "python")
     out, cfg = workdir / "rom.s", workdir / "functions.cfg"
     args = [str(python), "-I", str(Path(__file__).with_name("luvdis_run.py")), "disasm", str(rom), "--min-calls", "1",
             "--min-length", "2", "-o", str(out), "-co", str(cfg)]
     if cfg_in is not None:
         args[5:5] = ["-c", str(cfg_in)]
+    if not guess:
+        args.append("--no-guess")
     try:
         res = subprocess.run(capped(args), capture_output=True, text=True, timeout=LUVDis_SECONDS,
                              encoding="utf-8", errors="replace")
