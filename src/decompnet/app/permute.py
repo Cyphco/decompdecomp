@@ -354,5 +354,13 @@ class Permuter:
             if verdict is not None:
                 d = scoring.DiffResult(0 if verdict else max(1, d.score), d.max_score, d.rows, verdict)
             if d.score < best:
+                from pathlib import Path
+
+                from . import behavioral
+
+                # a project's own behavioral checks (behavioral-checks.json) can refuse a variant that only
+                # matches bytes: the permuter's rewrites are never read by an agent before they're recorded
+                if not behavioral.permits(Path(proj["root"]), fn["name"], result.obj):
+                    return None
                 self.net._record(fn, agent, d.score, source, ctx["version"], matched=d.bytes_match, via="permuter")
             return 0 if d.bytes_match else max(1, d.score)
