@@ -15,7 +15,11 @@ def compiler_for(cfg: dict, vram: int | None) -> dict:
     San Andreas: EE-GCC 2.95.3, and CodeWarrior 3.0.1 -O3 for some of its code), else the project's."""
     for r in cfg.get("compiler_ranges") or []:
         if vram is not None and r["start"] <= vram < r["end"]:
-            return {**cfg["compiler"], "toolchain": r["toolchain"], "flags": r["flags"]}
+            own = {**cfg["compiler"], "toolchain": r["toolchain"], "flags": r["flags"]}
+            own.pop("variant", None)  # the project's variant is its own compiler's, not the range's
+            if r.get("variant"):  # another binary of the range's toolchain (agbcc's old_agbcc: Toolchain.variants)
+                own["variant"] = r["variant"]
+            return own
     return cfg["compiler"]
 
 
@@ -41,6 +45,7 @@ def compiler_config(root: Path, cfg: dict) -> CompilerConfig:
     linux = False
     vm = False
     prelude, cplusplus = "", False
+    language = "c"
     if "toolchain" in c:
         try:
             tc = toolchains.get(own.like if own else c["toolchain"])  # (a copy of the user's runs as its pack does)
@@ -48,6 +53,8 @@ def compiler_config(root: Path, cfg: dict) -> CompilerConfig:
             raise toolchains.ToolchainError(unknown_compiler_message(c["toolchain"])) from None
         prelude, cplusplus = tc.prelude, tc.cplusplus
         vm = tc.via_vm
+        if not c.get("cmd"):
+            language = tc.language  # a custom command may support different languages than the registry's
         linux = tc.via_wsl  # Windows: a Linux toolchain, run inside WSL 2
         if own and vm:
             raise toolchains.ToolchainError(
@@ -58,8 +65,9 @@ def compiler_config(root: Path, cfg: dict) -> CompilerConfig:
         dirs = ((own.root, *(toolchains.require(d, linux) for d in tc.requires)) if own
                 else toolchains.runtime_dirs(tc.id))
         try:
+            skip = {d.name: toolchains.get(d.name).wsl_skip for d in dirs if d.name in toolchains.registry()}
             where_tools = (linuxvm.prepare_tools(dirs) if vm else
-                           wsl.prepare_tools(dirs) if linux else tuple(str(directory) for directory in dirs))
+                           wsl.prepare_tools(dirs, skip) if linux else tuple(str(directory) for directory in dirs))
         except (OSError, subprocess.SubprocessError, linuxvm.VMError) as error:
             raise toolchains.ToolchainError(f"{tc.name} couldn't prepare its compiler runtime: {error}") from None
         tc_dir = where_tools[0]
@@ -73,10 +81,18 @@ def compiler_config(root: Path, cfg: dict) -> CompilerConfig:
             base = [x for a in tc.cmd for x in (flags if a == "{flags}" else [a])]
         else:
             base = [*tc.cc, *flags, "-I{include}", "{src}", "-o", "{obj}"]
+        if (variant := c.get("variant")):
+            # another binary in the same pinned archive: some GBA library code needs agbcc's older snapshot, and its
+            # range keeps that choice so its matches stay matches
+            if variant not in tc.variants or not tc.cc:
+                known = ", ".join(sorted(tc.variants)) or "none"
+                raise toolchains.ToolchainError(f"{tc.name} has no variant {variant!r} (its variants: {known})")
+            base = [a.replace(tc.cc[0], tc.variants[variant]) for a in base]
         # The bundled Mac app owns a supported Python; /usr/bin/python3 may still be 3.9 and cannot run maspsx.
         # Linux sandboxes and WSL use their own python3, not a host interpreter outside their mounts.
         python = sys.executable if sys.platform == "darwin" and not vm else "python3"
         cmd = [a.replace("{tc}", tc_dir).replace("{python}", python) for a in base]
+        prelude = prelude.replace("{tc}", tc_dir)  # agbcp's prelude names its STLport headers' folders
         for dep, where in zip(tc.requires, where_tools[1:]):  # {tc:<id>} is another toolchain this one needs
             cmd = [a.replace(f"{{tc:{dep}}}", where) for a in cmd]
     else:
@@ -93,6 +109,7 @@ def compiler_config(root: Path, cfg: dict) -> CompilerConfig:
         linux_vm=vm,
         prelude=prelude,
         cplusplus=cplusplus,
+        language=language,
     )
 
 

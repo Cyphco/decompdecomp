@@ -80,6 +80,13 @@ class Toolchain:
 
     linux_vm: bool = False  # optional local macOS Linux runner for this pack
 
+    language: str = "c"  # "c++" only for a command which cannot compile C; otherwise try C first
+    # other binaries of the same archive a compiler range can pick ("variant"), each standing in for cc[0]:
+    # agbcc's old_agbcc, which some GBA games' library code was built with
+    variants: dict[str, str] = field(default_factory=dict)
+    # folders (relative to the toolchain's own) its WSL copy leaves out: what compiling never reads (wsl.prepare_tools)
+    wsl_skip: list[str] = field(default_factory=list)
+
     def __post_init__(self):
         self.requires = [*self.requires, *(h for h in self.headers if h not in self.requires)]
 

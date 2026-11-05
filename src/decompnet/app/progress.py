@@ -163,6 +163,22 @@ def _repair(net, pid: int, folder: Path, disk: dict[str, str], report) -> dict[s
 
 # #158: spimdisasm names a piece that starts at a jump target by its label, `.L80129B10`, and the app saves it so.
 NAME = re.compile(r"[A-Za-z_]\w*|\.L[0-9A-F]+")
+# GCC 2.95 (agbcp) names a class's secondary vtables and plain destructors with dots: linker symbols, never a source
+# file's name, so only the symbols list takes them (`__vt_11ScriptScene.15HardwareContext`, `_._14TilePoolRef756`)
+GNU_SECONDARY_VTABLE = re.compile(r"__vt_[0-9]+[A-Za-z_]\w*(?:\.[0-9]+[A-Za-z_]\w*)+")
+GNU_SIMPLE_DESTRUCTOR = re.compile(r"_\._([1-9][0-9]*)([A-Za-z_]\w*)")
+
+
+def _valid_symbol_name(symbol: dict) -> bool:
+    name = symbol.get("name", "")
+    if not isinstance(name, str):
+        return False
+    if NAME.fullmatch(name):
+        return True
+    if symbol.get("kind", "data") == "data" and GNU_SECONDARY_VTABLE.fullmatch(name):
+        return True
+    destructor = GNU_SIMPLE_DESTRUCTOR.fullmatch(name) if symbol.get("kind") == "func" else None
+    return bool(destructor and destructor.group(1) == str(len(destructor.group(2))))  # the length is the class name's
 
 
 def _manifest(files: dict[str, str], cfg: dict) -> dict:
@@ -176,11 +192,17 @@ def _manifest(files: dict[str, str], cfg: dict) -> dict:
         layout = {f["name"]: f for f in manifest.get("layout", [])}
         if len(layout) != len(manifest.get("layout", [])):
             raise ValueError("a function is listed twice in layout")
+        # Older GBA splits kept an empty row absorbed into the function before it, with its attempts and notes; its
+        # set_aside entry ("... (merged into it)") is the evidence that it's kept history, not a zero-byte function
+        merged = {(item.get("name"), item.get("vram")) for item in manifest.get("set_aside", [])
+                  if isinstance(item, dict) and isinstance(item.get("asm_code"), str)
+                  and "(merged into it)" in item["asm_code"]}
         for name, entry in layout.items():
             if not NAME.fullmatch(name):
                 raise ValueError(f"layout entry {name!r} is not a function name")
             if (not isinstance(entry["vram"], int)
-                    or not isinstance(entry["size"], int) or entry["size"] <= 0
+                    or not isinstance(entry["size"], int) or entry["size"] < 0
+                    or entry["size"] == 0 and (name, entry["vram"]) not in merged
                     or entry.get("status", "open") not in ("open", "asm")):
                 raise ValueError(f"layout entry {name!r} needs an integer vram and a size above 0")
         compiler = manifest.get("compiler")
@@ -191,7 +213,7 @@ def _manifest(files: dict[str, str], cfg: dict) -> dict:
                 or not isinstance(manifest.get("set_aside", []), list):
             raise ValueError("symbols, notes, knowledge and set_aside must be lists")
         for symbol in manifest.get("symbols", []):
-            if (not isinstance(symbol, dict) or not NAME.fullmatch(symbol.get("name", ""))
+            if (not isinstance(symbol, dict) or not _valid_symbol_name(symbol)
                     or not isinstance(symbol.get("address"), int) or not isinstance(symbol.get("size", 0), int)
                     or symbol.get("kind", "data") not in ("func", "data", "string", "jtbl", "bss")):
                 raise ValueError(f"symbol {symbol.get('name')!r} has an invalid name, address, size or kind")

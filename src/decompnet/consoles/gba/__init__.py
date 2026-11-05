@@ -16,8 +16,8 @@ checksum; its built ROM isn't committed).
 - The ARM/Thumb judge is arch/arm.py's (`ArmTarget`, `link`): each candidate is linked at its ROM address and compared
   byte for byte.
 
-Not yet (ROADMAP.md): old_agbcc/agbcc_arm as selectable compilers and compiler ranges, ARM look-alikes/twins, the
-permuter's GBA weights, C++ classes and struct layouts, and GBA debug symbols.
+Compiler ranges can pick agbcp (C++) or agbcc's old_agbcc variant. Not yet (ROADMAP.md): agbcc_arm, ARM
+look-alikes/twins, the permuter's GBA weights, and GBA debug symbols.
 """
 
 from __future__ import annotations
@@ -42,6 +42,9 @@ class GameBoyAdvance(Console):
     layout = "luvdis"
     compilers = (
         Compiler("agbcc", "agbcc", "most Game Boy Advance games (pret's rebuild of GCC 2.95)", guess="AGBCC"),
+        # a game written partly in C++ gives that code a compiler range of its own (Harvest Moon: Friends of Mineral
+        # Town); its old library code may also pick agbcc's old_agbcc (a range's "variant": Toolchain.variants)
+        Compiler("agbcp", "agbcp (C++)", "GBA games written in C++ (agbcc's C++ frontend with STLport)"),
     )
     kits = ("own-gba",)  # another build of one of its compilers, the user's (kits/owncompiler.py)
     guides = ("arm", "gba")
