@@ -257,9 +257,8 @@ def _project_info(net: RomNetwork, slug: str) -> str:
     return (f"{ov['title']} ({ov['rom']['game_code']}, {ov['rom']['region']})\n"
             f"compiler: {ov['compiler']['name']} {' '.join(ov['compiler']['flags'])}"
             + (f"; these address ranges are built with another:{ranges}" if ranges else "") + "\n"
-            + (f"this project's compilers (for try_compiler): {', '.join(_with_variants(ov['compilers']))}
-"
-               if len(ov["compilers"]) > 1 else "")
+            + (f"this project's compilers (for try_compiler): {', '.join(_with_variants(ov['compilers']))}\n"
+               if len(_with_variants(ov["compilers"])) > 1 else "")
             + f"progress: {ov['matched']}/{ov['functions']} functions matched ({pct:.1f}% of code), "
             f"{ov['attempts']} compiles so far, context.h v{ov['context_version']}\n"
             f"Next: claim_function(). Guides: guide().")

@@ -24,7 +24,7 @@ def test_export_rejudges_an_in_place_source_edit_before_selecting_sources(projec
         exported.append(net._function("f", slug)["matched_source"])
         return {"path": str(out), "identical": True}
 
-    monkeypatch.setattr(net, "console", lambda _: SimpleNamespace(export=export))
+    monkeypatch.setattr(net, "console", lambda _: SimpleNamespace(export_project=export))
     net.export_rom("game", log=lambda _: None)
     assert exported == ["good changed"]
     assert judged == [("f", "good original"), ("f", "good changed")]

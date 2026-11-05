@@ -178,23 +178,31 @@ def main() -> int:
 
     def variants(job: dict):
         name, count = job["function"], int(job["count"])
-        # agbcp's C in `extern "C"` is read as C (and wrapped again below); the source's own macros are expanded, or
-        # when they can't be (#if, #include), its preprocessor lines go and come back in front of each variant for the
-        # compiler (autopilot's drafts start with m2c's macros, seeds.M2C_MACROS: no draft ever parsed with them in)
+        # agbcp's C in `extern "C"` is read as C (and wrapped again below). The source's own preprocessor lines go
+        # and come back in front of each variant for the compiler (autopilot's drafts start with m2c's macros,
+        # seeds.M2C_MACROS: no draft ever parsed with them in); where the C doesn't parse without them (a macro
+        # that takes a type, an agent's `#define W(p,o) ...`), its own macros are expanded instead (own_macros)
         source, wrapped = without_extern_c(plain_c(job["source"]))
-        try:
-            source = own_macros(source)
-        except ValueError:
-            pass
-        directives = "".join(line + "\n" for line in source.splitlines() if line.lstrip().startswith("#"))
-        unit = (f"{plain_c(job['header'], directives=False)}\ntypedef int {SOURCE_STARTS};\n"
-                f"{plain_c(source, directives=False)}\n")
+        header = plain_c(job["header"], directives=False)
         rng = random.Random(job["seed"])
-        try:
-            weights = get_default_randomization_weights(job.get("family") or "base")
-            first = Candidate.from_source(unit, EvalState(), name, weights, rng.randrange(1, MAX_SEED))
-        except Exception as e:  # the C or the header isn't C pycparser reads (a macro call, a compiler extension)
-            yield {"error": f"{type(e).__name__}: {e}"}
+        weights = get_default_randomization_weights(job.get("family") or "base")
+        error = None
+        for attempt in ("kept", "expanded"):
+            if attempt == "expanded":
+                try:
+                    source = own_macros(source)
+                except ValueError:
+                    break
+            directives = "".join(line + "\n" for line in source.splitlines() if line.lstrip().startswith("#"))
+            unit = f"{header}\ntypedef int {SOURCE_STARTS};\n{plain_c(source, directives=False)}\n"
+            try:
+                first = Candidate.from_source(unit, EvalState(), name, weights, rng.randrange(1, MAX_SEED))
+                error = None
+                break
+            except Exception as e:  # the C or the header isn't C pycparser reads (a macro call, a compiler extension)
+                error = e
+        if error is not None:
+            yield {"error": f"{type(error).__name__}: {error}"}
             return
         seam = next(node for node in first.ast.ext if isinstance(node, c_ast.Typedef) and node.name == SOURCE_STARTS)
 
