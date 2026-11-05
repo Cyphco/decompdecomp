@@ -234,6 +234,12 @@ def _check_c(net, proj, row, thumb: bool, units, f: dict) -> str | None:
             return "its own data isn't laid out like the game's"
         own[section] = base.pop()
     f["own"] = own
+    # Persist the exact-judged extent: the build must reject shortened owned data
+    # even when its remaining bytes still equal the original ROM prefix.
+    from io import BytesIO
+    from elftools.elf.elffile import ELFFile
+    elf = ELFFile(BytesIO(compiled.obj))
+    f["own_sizes"] = {section: elf.get_section_by_name(section)["sh_size"] for section in own}
     return None
 
 

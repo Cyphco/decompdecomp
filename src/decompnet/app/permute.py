@@ -353,5 +353,8 @@ class Permuter:
             if verdict is not None:
                 d = scoring.DiffResult(0 if verdict else max(1, d.score), d.max_score, d.rows, verdict)
             if d.score < best:
+                from . import behavioral
+                if not behavioral.permits(Path(proj["root"]), fn["name"], result.obj):
+                    return None
                 self.net._record(fn, agent, d.score, source, ctx["version"], matched=d.bytes_match, via="permuter")
             return 0 if d.bytes_match else max(1, d.score)

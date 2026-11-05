@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import stat
 import threading
 import time
@@ -32,6 +33,31 @@ from . import saves
 
 CHECK_SECONDS = 0.25  # a non-forced check of an unchanged folder is this rare per project
 PARTIAL_FUNCTIONS = 256  # more changed functions than this: one full query beats this many per-name lookups
+
+# GCC 2.95 emits dotted names for secondary vtables. These are linker data
+# symbols, never source-file names; keep layout/path identifiers unchanged.
+GNU_SECONDARY_VTABLE = re.compile(
+    r"__vt_[0-9]+[A-Za-z_][A-Za-z_0-9]*(?:\.[0-9]+[A-Za-z_][A-Za-z_0-9]*)+"
+)
+
+
+# GCC 2.x plain-class destructors are linker function symbols, not C identifiers.
+# Only accept a length-checked simple class name; layout/file names stay strict.
+GNU_SIMPLE_DESTRUCTOR = re.compile(r"_\._([1-9][0-9]*)([A-Za-z_][A-Za-z_0-9]*)")
+
+
+def _valid_gnu_destructor(name: str) -> bool:
+    match = GNU_SIMPLE_DESTRUCTOR.fullmatch(name)
+    return bool(match and match.group(1) == str(len(match.group(2))))
+
+
+def _valid_symbol_name(symbol: dict) -> bool:
+    name = symbol.get("name", "")
+    return isinstance(name, str) and bool(
+        IDENT.fullmatch(name)
+        or symbol.get("kind", "data") == "data" and GNU_SECONDARY_VTABLE.fullmatch(name)
+        or symbol.get("kind") == "func" and _valid_gnu_destructor(name)
+    )
 
 
 def _hash(text: str | None) -> str | None:
@@ -145,7 +171,7 @@ def _manifest(files: dict[str, str], cfg: dict) -> dict:
                 or not isinstance(manifest.get("set_aside", []), list):
             raise ValueError
         for symbol in manifest.get("symbols", []):
-            if (not isinstance(symbol, dict) or not IDENT.fullmatch(symbol.get("name", ""))
+            if (not isinstance(symbol, dict) or not _valid_symbol_name(symbol)
                     or not isinstance(symbol.get("address"), int) or not isinstance(symbol.get("size", 0), int)
                     or symbol.get("kind", "data") not in ("func", "data", "string", "jtbl", "bss")):
                 raise ValueError
