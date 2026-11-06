@@ -46,6 +46,14 @@ def packs(platform: str) -> dict[str, tuple[str, str, str, tuple[str, ...]]]:
     return out
 
 
+@functools.cache
+def _paths(platform: str) -> dict[str, tuple[str, ...]]:
+    """Every path in its folder a pinned compiler's cc and cmd name: which pack a folder holding two programs is."""
+    pinned = tomllib.loads(resources.files("decompnet").joinpath("toolchains.toml").read_text(encoding="utf-8"))
+    return {tid: tuple(dict.fromkeys(_PROGRAM.findall(" ".join([*spec.get("cc", []), *spec.get("cmd", [])]))))
+            for tid, spec in pinned.items() if spec.get("platform") == platform}
+
+
 class OwnCompilers(Kit):
     """The kit of one console: `platform` is its packs' (and its Setup group's), `short` what its card calls it."""
 
@@ -89,8 +97,10 @@ class OwnCompilers(Kit):
         # the kinds whose version the folder names; none named: the first. (A PSP GCC 1.3.1 also holds psp/bin/gcc,
         # which 1.7.1 runs: named nowhere, it isn't offered.)
         named = [(exe, k) for exe, (*_, ks) in read.items() for k in ks]
-        if not named and by_program:
-            exe, kinds = next(iter(by_program.items()))
+        if not named and by_program:  # (an agbcp folder holds bin/agbcc too: the pack more of whose files it has)
+            have = _paths(self.platform)
+            exe, kinds = max(by_program.items(), key=lambda ek: sum(
+                (folder / q).exists() for q in have.get(ek[1][0][0], ())))
             named = [(exe, kinds[0])]
         alike = {runs: (exe, tid, name) for exe, (tid, name, runs) in reversed(named)}  # (the first of those alike)
         out = []
