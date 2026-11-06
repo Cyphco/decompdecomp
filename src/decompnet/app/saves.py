@@ -768,7 +768,9 @@ def _judge_saved(net, slug: str, folder: Path, manifest: dict, by_name: dict, sa
         if current["status"] == "matched":
             matched += kind == "src"
             continue
-        if kind == "best" and current["best_source"] == text:
+        # (a save writes a source with a final newline, _source_text, which the database's copy may not have:
+        # compared as saved, or every read judged the same attempts again)
+        if kind == "best" and current["best_source"] is not None and _source_text(current["best_source"]) == text:
             best += 1
             continue
         if not judge_code:

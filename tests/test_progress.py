@@ -204,6 +204,28 @@ def test_setting_one_function_aside_in_the_folder_judges_only_that_function(proj
     assert row["status"] == "asm" and json.loads(row["meta"])["asm_code"] == "hand-written"
 
 
+def test_a_helper_writing_one_c_file_judges_only_that_file_and_keeps_the_notes(project):
+    """A helper outside the app writes src/ and best/ files: the other saved attempts (written with the final newline the
+    database's copies lack) aren't judged again, and the notes aren't deleted and put back each time."""
+    net, folder, judged = project
+    with net.store.tx() as db:
+        db.execute("UPDATE functions SET best_source='close attempt',best_score=10 WHERE name='f'")
+    agent, _ = net.local_agent("writer")
+    net.add_note(agent, "game", "a note that stays put", "f")
+    net.progress.sync("game", force=True)
+    saves.save(net, "game")
+    net.progress.sync("game", force=True)
+    assert (folder / "best/f.c").read_text().endswith("close attempt\n")
+    notes = [tuple(r) for r in net.store.all("SELECT * FROM notes")]
+    judged.clear()
+    (folder / "src").mkdir(exist_ok=True)
+    (folder / "src/g.c").write_text("good g", encoding="utf-8")
+    assert net.progress.sync("game", force=True)
+    assert judged == [("g", "good g")]
+    assert net._function("g", "game")["status"] == "matched"
+    assert [tuple(r) for r in net.store.all("SELECT * FROM notes")] == notes
+
+
 def test_a_header_change_keeps_the_last_match_until_rejudging_can_run(project, monkeypatch):
     net, folder, _ = project
     with net.store.tx() as db:

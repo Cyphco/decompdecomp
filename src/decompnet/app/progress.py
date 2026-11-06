@@ -1086,16 +1086,25 @@ class Progress:
                                        "best_agent_id=CASE WHEN ? THEN best_agent_id ELSE NULL END WHERE id=?",
                                        (status, keep, keep, keep, row["id"]))
                             db.execute("DELETE FROM claims WHERE function_id=?", (row["id"],))
-                    db.execute("DELETE FROM notes WHERE project_id=?", (pid,))
-                    db.execute("DELETE FROM knowledge WHERE project_id=? AND status='accepted'", (pid,))
-                    units = set(applied_manifest.get("headers") or {})
-                    for row in db.execute("SELECT DISTINCT unit FROM context_versions WHERE project_id=?",
-                                          (pid,)).fetchall():
-                        if row["unit"] and row["unit"] not in units:
-                            db.execute("DELETE FROM context_versions WHERE project_id=? AND unit=?",
-                                       (pid, row["unit"]))
-                    by_name, _ = saves._apply_context(net, slug, folder, applied_manifest, report,
-                                                     files=applied_files)
+                    if (before is not None and not all_code
+                            and not any(name == saves.MANIFEST or name.startswith("include/") for name in changed)):
+                        # Only C files changed on disk (a helper outside the app wrote src/ or best/): the folder's
+                        # notes, settings, layout and set-aside are already the database's (the manifest this sync
+                        # writes is rendered from it). Deleting and putting all of them back took most of a minute
+                        # on a large project, once per file written.
+                        by_name = {r["name"]: r for r in db.execute(
+                            "SELECT name,vram FROM functions WHERE project_id=?", (pid,)).fetchall()}
+                    else:
+                        db.execute("DELETE FROM notes WHERE project_id=?", (pid,))
+                        db.execute("DELETE FROM knowledge WHERE project_id=? AND status='accepted'", (pid,))
+                        units = set(applied_manifest.get("headers") or {})
+                        for row in db.execute("SELECT DISTINCT unit FROM context_versions WHERE project_id=?",
+                                              (pid,)).fetchall():
+                            if row["unit"] and row["unit"] not in units:
+                                db.execute("DELETE FROM context_versions WHERE project_id=? AND unit=?",
+                                           (pid, row["unit"]))
+                        by_name, _ = saves._apply_context(net, slug, folder, applied_manifest, report,
+                                                         files=applied_files)
                     if not saves._publish(folder, pending, removed, expected=disk,
                                           chosen=bool(cfg.get("progress_folder"))):
                         raise _FolderChanged
