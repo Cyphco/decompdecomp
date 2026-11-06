@@ -949,6 +949,7 @@ class Progress:
             # A helper can finish another function just before a pull. Publish that independent work before
             # loading the pull; the contributor wins if both changed the same file.
             all_code = False
+            aside = set()  # functions whose set-aside entry alone changed: only they are judged again
             pending = {}
             if projected is not None:
                 rendered = comparison if comparison is not None else saves._render(net, slug)[0]
@@ -980,7 +981,13 @@ class Progress:
                 if saves.MANIFEST in changed:
                     old = json.loads(comparison_manifest)
                     all_code |= any(old.get(key) != merged_manifest.get(key) for key in
-                                    ("compiler", "compiler_ranges", "headers", "set_aside"))
+                                    ("compiler", "compiler_ranges", "headers"))
+                    # An agent setting one function aside (or taking it back) changes that function, not the code
+                    # every other one is built from: judging all of them again held the project for many minutes.
+                    old_aside = {(i.get("name"), i.get("vram")): i for i in old.get("set_aside") or []}
+                    new_aside = {(i.get("name"), i.get("vram")): i for i in merged_manifest.get("set_aside") or []}
+                    aside = {key[0] for key in old_aside.keys() | new_aside.keys()
+                             if old_aside.get(key) != new_aside.get(key)}
                     all_code |= ({s["name"]: s for s in old.get("symbols", [])}
                                  != {s["name"]: s for s in merged_manifest.get("symbols", [])})
                     if old.get("layout") != merged_manifest.get("layout"):
@@ -1045,7 +1052,8 @@ class Progress:
                     rows = db.execute("SELECT id,name,vram,n_insns FROM functions WHERE project_id=?",
                                       (pid,)).fetchall()
                     for row in rows:
-                        changed_source = f"src/{row['name']}.c" in applied_changed
+                        changed_source = (f"src/{row['name']}.c" in applied_changed
+                                          or (row["name"] in aside and not all_code))
                         changed_best = f"best/{row['name']}.c" in applied_changed
                         keep_backup = False
                         keep_best = False

@@ -186,6 +186,24 @@ def test_headers_rejudge_existing_matches(project):
     assert len(judged) == 2
 
 
+def test_setting_one_function_aside_in_the_folder_judges_only_that_function(project):
+    """An agent's set-aside entry written into decompdecomp.json changes one function, not every match: judging all of
+    them again held a 4,000-function project for many minutes."""
+    net, folder, judged = project
+    (folder / "src").mkdir()
+    (folder / "src/f.c").write_text("good", encoding="utf-8")
+    net.progress.sync("game", force=True)
+    assert net._function("f", "game")["status"] == "matched"
+    judged.clear()
+    data = json.loads((folder / saves.MANIFEST).read_text())
+    manifest(folder, set_aside=[*data.get("set_aside", []), {"name": "g", "vram": 4100, "asm_code": "hand-written"}])
+    assert net.progress.sync("game", force=True)
+    assert judged == []
+    assert net._function("f", "game")["status"] == "matched"
+    row = net._function("g", "game")
+    assert row["status"] == "asm" and json.loads(row["meta"])["asm_code"] == "hand-written"
+
+
 def test_a_header_change_keeps_the_last_match_until_rejudging_can_run(project, monkeypatch):
     net, folder, _ = project
     with net.store.tx() as db:
